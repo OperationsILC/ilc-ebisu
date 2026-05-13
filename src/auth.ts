@@ -27,7 +27,12 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
 	providers: [
 		Google({
 			clientId: process.env.AUTH_GOOGLE_ID,
-			clientSecret: process.env.AUTH_GOOGLE_SECRET
+			clientSecret: process.env.AUTH_GOOGLE_SECRET,
+			// Safe given our @ilcstudios.com Google Workspace allowlist: we control
+			// who has an email in that domain, so auto-linking a Google account to
+			// an existing user (seeded or otherwise) with the same email is fine.
+			// Without this, Auth.js refuses to link → silent sign-in failure → loop.
+			allowDangerousEmailAccountLinking: true
 		})
 	],
 	session: { strategy: 'database' },
