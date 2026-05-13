@@ -1,6 +1,7 @@
 // Direct SQL migration runner — bypasses drizzle-kit's CLI which hangs on
-// AWS RDS SSL. Reads every .sql file in src/lib/server/db/migrations in
-// order and executes each one as a single transaction.
+// AWS RDS SSL. Reads every .sql file in src/lib/db/migrations in order and
+// executes each one as a single transaction. Tracks applied migrations in a
+// __migrations table so re-runs are no-ops.
 
 import fs from 'node:fs/promises';
 import path from 'node:path';
@@ -8,7 +9,7 @@ import { fileURLToPath } from 'node:url';
 import pg from 'pg';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const MIGRATIONS_DIR = path.resolve(__dirname, '../src/lib/server/db/migrations');
+const MIGRATIONS_DIR = path.resolve(__dirname, '../src/lib/db/migrations');
 const ENV_PATH = path.resolve(__dirname, '../.env');
 
 function parseEnv(text) {

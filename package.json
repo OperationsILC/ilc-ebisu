@@ -6,7 +6,11 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "db:generate": "drizzle-kit generate",
+    "db:migrate": "node scripts/migrate.mjs",
+    "db:seed": "node scripts/seed.mjs",
+    "db:verify": "node scripts/verify.mjs"
   },
   "dependencies": {
     "@auth/drizzle-adapter": "^1.11.2",

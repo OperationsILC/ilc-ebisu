@@ -369,6 +369,64 @@ export const budgetLines = pgTable('budget_lines', {
 });
 
 // ---------------------------------------------------------------------------
+// RFQs (Request For Quote)
+// ---------------------------------------------------------------------------
+// A PM picks QAP lines they want priced and sends an RFQ to a rep firm. The
+// rep firm (a company with role='rep_firm') quotes back. Quoted DNs flow
+// into qap_lines.current_dn (via a manual PM action on the QAP grid), they
+// don't auto-update — preserving the QAP-is-source-of-truth invariant.
+
+export const rfqs = pgTable('rfqs', {
+	id: uuid('id').defaultRandom().primaryKey(),
+	projectId: uuid('project_id')
+		.notNull()
+		.references(() => projects.id, { onDelete: 'cascade' }),
+	repFirmCompanyId: uuid('rep_firm_company_id').references(() => companies.id),
+	rfqNo: text('rfq_no').notNull().unique(),
+	// e.g. "RFQ00001"
+	status: text('status').notNull().default('draft'),
+	// draft | sent | quoted | accepted | declined | cancelled
+	notes: text('notes'),
+	sentAt: timestamp('sent_at', { withTimezone: true }),
+	createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+	updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+	createdByUserId: uuid('created_by_user_id').references(() => users.id)
+});
+
+export const rfqLines = pgTable(
+	'rfq_lines',
+	{
+		id: uuid('id').defaultRandom().primaryKey(),
+		rfqId: uuid('rfq_id')
+			.notNull()
+			.references(() => rfqs.id, { onDelete: 'cascade' }),
+		qapLineId: uuid('qap_line_id')
+			.notNull()
+			.references(() => qapLines.id, { onDelete: 'restrict' }),
+
+		// Snapshot of QAP values at RFQ creation. Keeps the RFQ historically
+		// stable even if the QAP is later edited.
+		qtySnapshot: numeric('qty_snapshot'),
+		typeNameSnapshot: text('type_name_snapshot'),
+		catalogNoSnapshot: text('catalog_no_snapshot'),
+		manufacturerNameSnapshot: text('manufacturer_name_snapshot'),
+		descriptionSnapshot: text('description_snapshot'),
+
+		// Filled in when the rep quotes back. The PM manually pushes this to
+		// qap_lines.current_dn from the QAP grid when they accept the quote.
+		quotedDn: numeric('quoted_dn'),
+		quoteReceivedAt: timestamp('quote_received_at', { withTimezone: true }),
+
+		createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow()
+	},
+	(t) => [
+		unique('rfq_lines_rfq_qap_uq').on(t.rfqId, t.qapLineId),
+		index('rfq_lines_rfq_idx').on(t.rfqId),
+		index('rfq_lines_qap_idx').on(t.qapLineId)
+	]
+);
+
+// ---------------------------------------------------------------------------
 // Cell-level audit log
 // ---------------------------------------------------------------------------
 // One row per cell change, not per row change. Keeps the table size proportional
@@ -402,6 +460,10 @@ export type User = typeof users.$inferSelect;
 export type NewUser = typeof users.$inferInsert;
 export type Project = typeof projects.$inferSelect;
 export type NewProject = typeof projects.$inferInsert;
+export type Rfq = typeof rfqs.$inferSelect;
+export type NewRfq = typeof rfqs.$inferInsert;
+export type RfqLine = typeof rfqLines.$inferSelect;
+export type NewRfqLine = typeof rfqLines.$inferInsert;
 export type Company = typeof companies.$inferSelect;
 export type NewCompany = typeof companies.$inferInsert;
 export type QapLine = typeof qapLines.$inferSelect;
