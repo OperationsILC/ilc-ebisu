@@ -15,12 +15,13 @@ export type ImportOutcome = {
 	importSessionId: string;
 	imported: number;
 	updated: number;
-	skipped: number; // unchanged hash
+	unchanged: number; // hash matched existing row — true no-op
+	skippedIncomplete: number; // missing TYPE / CATALOG # / matched MANUFACTURER
 	skippedNoMatch: number; // manufacturer mismatch, user chose Ignore
 	failed: number;
 	rowDetails: Array<{
 		row: number;
-		status: 'inserted' | 'updated' | 'unchanged' | 'skipped_mfr' | 'error';
+		status: 'inserted' | 'updated' | 'unchanged' | 'skipped_incomplete' | 'skipped_mfr' | 'error';
 		message?: string;
 		qapLineId?: string;
 	}>;
@@ -52,7 +53,8 @@ export async function runImport(opts: RunOpts): Promise<ImportOutcome> {
 		importSessionId: '',
 		imported: 0,
 		updated: 0,
-		skipped: 0,
+		unchanged: 0,
+		skippedIncomplete: 0,
 		skippedNoMatch: 0,
 		failed: 0,
 		rowDetails: []
@@ -86,7 +88,8 @@ export async function runImport(opts: RunOpts): Promise<ImportOutcome> {
 			const result = await importOneRow(row, opts, session.id);
 			if (result.status === 'inserted') outcome.imported++;
 			else if (result.status === 'updated') outcome.updated++;
-			else outcome.skipped++;
+			else if (result.status === 'skipped_incomplete') outcome.skippedIncomplete++;
+			else outcome.unchanged++;
 			outcome.rowDetails.push({ row: rowNum, ...result });
 		} catch (err) {
 			outcome.failed++;
@@ -103,7 +106,7 @@ export async function runImport(opts: RunOpts): Promise<ImportOutcome> {
 		.update(importSessions)
 		.set({
 			rowsImported: outcome.imported + outcome.updated,
-			rowsSkipped: outcome.skipped + outcome.skippedNoMatch,
+			rowsSkipped: outcome.unchanged + outcome.skippedIncomplete + outcome.skippedNoMatch,
 			rowsFailed: outcome.failed,
 			completedAt: new Date(),
 			status: 'completed',
@@ -119,7 +122,7 @@ async function importOneRow(
 	opts: RunOpts,
 	importSessionId: string
 ): Promise<{
-	status: 'inserted' | 'updated' | 'unchanged';
+	status: 'inserted' | 'updated' | 'unchanged' | 'skipped_incomplete';
 	qapLineId?: string;
 	message?: string;
 }> {
@@ -127,8 +130,10 @@ async function importOneRow(
 	const catalogNo = (row['CATALOG #'] ?? '').trim();
 	const mfrName = (row['MANUFACTURER'] ?? '').trim();
 
-	if (!typeName) return { status: 'unchanged', message: 'TYPE is empty — skipped' };
-	if (!catalogNo) return { status: 'unchanged', message: 'CATALOG # is empty — skipped' };
+	if (!typeName)
+		return { status: 'skipped_incomplete', message: 'no TYPE on this row' };
+	if (!catalogNo)
+		return { status: 'skipped_incomplete', message: 'no CATALOG # on this row' };
 
 	const mfrId = mfrName ? opts.validation.matched.get(mfrName) : null;
 
@@ -137,11 +142,11 @@ async function importOneRow(
 
 	// 2. Resolve/create PRODUCT (scoped to manufacturer)
 	if (!mfrId) {
-		// Without manufacturer we can't anchor the product. Skip rather than
-		// create products with NULL manufacturer.
+		// Without a known manufacturer we can't anchor the product. Skip rather
+		// than create products with NULL manufacturer.
 		return {
-			status: 'unchanged',
-			message: 'No manufacturer match (and user did not choose Ignore for this row?)'
+			status: 'skipped_incomplete',
+			message: 'no MANUFACTURER match on this row'
 		};
 	}
 	const productId = await upsertProduct(mfrId, catalogNo, row);

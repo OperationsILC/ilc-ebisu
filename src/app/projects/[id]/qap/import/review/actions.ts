@@ -46,10 +46,17 @@ export async function ignoreAndImport(projectId: string, sessionId: string) {
 		.set({ status: 'completed', completedAt: new Date() })
 		.where(eq(importSessions.id, sessionId));
 
-	const message =
-		`Imported ${outcome.imported}, updated ${outcome.updated}, ` +
-		`skipped ${outcome.skipped} unchanged, ${outcome.skippedNoMatch} skipped for unmatched mfr, ` +
-		`${outcome.failed} failed.`;
+	const parts = [
+		`${outcome.imported} imported`,
+		outcome.updated > 0 && `${outcome.updated} updated`,
+		outcome.unchanged > 0 && `${outcome.unchanged} unchanged (re-import, hash matched)`,
+		outcome.skippedIncomplete > 0 &&
+			`${outcome.skippedIncomplete} skipped — incomplete (no TYPE / CATALOG # / matched MANUFACTURER)`,
+		outcome.skippedNoMatch > 0 &&
+			`${outcome.skippedNoMatch} skipped — unmatched manufacturer (Ignored)`,
+		outcome.failed > 0 && `${outcome.failed} failed`
+	].filter(Boolean);
+	const message = parts.join(', ') + '.';
 	redirect(`/projects/${projectId}/qap?msg=${encodeURIComponent(message)}`);
 }
 
