@@ -1,19 +1,30 @@
 import { db } from '@/lib/db';
 import { projects, qapLines } from '@/lib/db/schema';
-import { desc, sql } from 'drizzle-orm';
+import { count, desc } from 'drizzle-orm';
 
 export default async function ProjectsPage() {
-	const rows = await db
+	const allProjects = await db
 		.select({
 			id: projects.id,
 			name: projects.name,
 			status: projects.status,
 			marginPct: projects.marginPct,
-			createdAt: projects.createdAt,
-			qapCount: sql<number>`(SELECT count(*) FROM ${qapLines} WHERE ${qapLines.projectId} = ${projects.id})`
+			createdAt: projects.createdAt
 		})
 		.from(projects)
 		.orderBy(desc(projects.createdAt));
+
+	// One grouped count query, instead of a per-row correlated subquery
+	// that interpolated incorrectly in Drizzle's sql template.
+	const counts = await db
+		.select({
+			projectId: qapLines.projectId,
+			n: count()
+		})
+		.from(qapLines)
+		.groupBy(qapLines.projectId);
+
+	const countMap = new Map(counts.map((c) => [c.projectId, c.n]));
 
 	return (
 		<>
@@ -25,7 +36,7 @@ export default async function ProjectsPage() {
 				</a>
 			</p>
 
-			{rows.length === 0 ? (
+			{allProjects.length === 0 ? (
 				<p className="muted">No projects yet. Create one to get started.</p>
 			) : (
 				<table className="plain">
@@ -40,14 +51,14 @@ export default async function ProjectsPage() {
 						</tr>
 					</thead>
 					<tbody>
-						{rows.map((p) => (
+						{allProjects.map((p) => (
 							<tr key={p.id}>
 								<td>
 									<a href={`/projects/${p.id}`}>{p.name}</a>
 								</td>
 								<td>{p.status}</td>
 								<td>{p.marginPct ?? '—'}</td>
-								<td>{p.qapCount}</td>
+								<td>{countMap.get(p.id) ?? 0}</td>
 								<td>{new Date(p.createdAt).toLocaleDateString()}</td>
 								<td>
 									<a href={`/projects/${p.id}/qap`}>QAP</a>

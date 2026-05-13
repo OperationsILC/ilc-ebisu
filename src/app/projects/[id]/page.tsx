@@ -1,6 +1,6 @@
 import { db } from '@/lib/db';
 import { projects, qapLines } from '@/lib/db/schema';
-import { eq, sql } from 'drizzle-orm';
+import { eq, count } from 'drizzle-orm';
 import { notFound } from 'next/navigation';
 
 export default async function ProjectDetailPage({
@@ -9,18 +9,16 @@ export default async function ProjectDetailPage({
 	params: Promise<{ id: string }>;
 }) {
 	const { id } = await params;
-	const rows = await db
-		.select({
-			project: projects,
-			qapCount: sql<number>`(SELECT count(*) FROM ${qapLines} WHERE ${qapLines.projectId} = ${projects.id})`
-		})
-		.from(projects)
-		.where(eq(projects.id, id))
-		.limit(1);
 
-	if (rows.length === 0) notFound();
-	const p = rows[0].project;
-	const qapCount = rows[0].qapCount;
+	const project = (await db.select().from(projects).where(eq(projects.id, id)).limit(1))[0];
+	if (!project) notFound();
+
+	const [{ qapCount }] = await db
+		.select({ qapCount: count() })
+		.from(qapLines)
+		.where(eq(qapLines.projectId, id));
+
+	const p = project;
 
 	return (
 		<>
