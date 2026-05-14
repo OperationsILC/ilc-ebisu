@@ -3,7 +3,7 @@
 import { useMemo, useState, useTransition } from 'react';
 import {
 	updateRfqStatus,
-	saveQuotes,
+	saveRfqLineEdits,
 	applyQuoteToQap,
 	applyAllQuotesToQap,
 	sendRfqEmail
@@ -45,25 +45,44 @@ export default function RfqDetailClient({ projectId, projectName, rfq, lines }: 
 	const [flash, setFlash] = useState<string | null>(null);
 	const [error, setError] = useState<string | null>(null);
 
-	// Local edits to quoted_dn before save. Keyed by rfq_line id.
-	const [edits, setEdits] = useState<Record<string, string>>(() =>
+	// Local edits before save. Two maps keyed by rfq_line id — one per editable
+	// column. We track them separately so we can tell which fields changed and
+	// only send those to the server.
+	const [qtyEdits, setQtyEdits] = useState<Record<string, string>>(() =>
+		Object.fromEntries(lines.map((l) => [l.id, l.qtySnapshot ?? '']))
+	);
+	const [quotedEdits, setQuotedEdits] = useState<Record<string, string>>(() =>
 		Object.fromEntries(lines.map((l) => [l.id, l.quotedDn ?? '']))
 	);
 
 	const dirtyCount = useMemo(() => {
 		let n = 0;
 		for (const l of lines) {
-			const v = edits[l.id] ?? '';
-			const orig = l.quotedDn ?? '';
-			if (v !== orig) n++;
+			const qty = qtyEdits[l.id] ?? '';
+			const origQty = l.qtySnapshot ?? '';
+			const quoted = quotedEdits[l.id] ?? '';
+			const origQuoted = l.quotedDn ?? '';
+			if (qty !== origQty || quoted !== origQuoted) n++;
 		}
 		return n;
-	}, [edits, lines]);
+	}, [qtyEdits, quotedEdits, lines]);
 
-	const totalQty = lines.reduce((s, l) => s + Number(l.qtySnapshot ?? 0), 0);
-	const linesWithQuotes = lines.filter((l) => l.quotedDn !== null).length;
+	// Effective qty for totals: dirty edit takes precedence over snapshot.
+	function effectiveQty(l: Line): number {
+		const e = qtyEdits[l.id];
+		if (e !== undefined && e !== '') return Number(e);
+		return Number(l.qtySnapshot ?? 0);
+	}
+	function effectiveQuoted(l: Line): number {
+		const e = quotedEdits[l.id];
+		if (e !== undefined && e !== '') return Number(e);
+		return Number(l.quotedDn ?? 0);
+	}
+
+	const totalQty = lines.reduce((s, l) => s + effectiveQty(l), 0);
+	const linesWithQuotes = lines.filter((l) => (quotedEdits[l.id] ?? '') !== '').length;
 	const quotedTotal = lines.reduce(
-		(s, l) => s + Number(l.quotedDn ?? 0) * Number(l.qtySnapshot ?? 0),
+		(s, l) => s + effectiveQuoted(l) * effectiveQty(l),
 		0
 	);
 	const appliedCount = lines.filter((l) => l.appliedToQapAt !== null).length;
@@ -107,18 +126,32 @@ export default function RfqDetailClient({ projectId, projectName, rfq, lines }: 
 		});
 	}
 
-	function onSaveQuotes() {
-		const quotes = lines
-			.map((l) => ({ id: l.id, quotedDn: edits[l.id] ?? '' }))
-			.filter((q) => (q.quotedDn ?? '') !== (lines.find((l) => l.id === q.id)?.quotedDn ?? ''));
-		if (quotes.length === 0) {
+	function onSaveLineEdits() {
+		const changes: { id: string; fields: { qty?: string; quotedDn?: string } }[] = [];
+		for (const l of lines) {
+			const qty = qtyEdits[l.id] ?? '';
+			const origQty = l.qtySnapshot ?? '';
+			const quoted = quotedEdits[l.id] ?? '';
+			const origQuoted = l.quotedDn ?? '';
+			const fields: { qty?: string; quotedDn?: string } = {};
+			if (qty !== origQty) fields.qty = qty;
+			if (quoted !== origQuoted) fields.quotedDn = quoted;
+			if (Object.keys(fields).length > 0) changes.push({ id: l.id, fields });
+		}
+		if (changes.length === 0) {
 			flashThen('Nothing to save.');
 			return;
 		}
 		startTransition(async () => {
-			const r = await saveQuotes(projectId, rfq.id, JSON.stringify({ quotes }));
+			const r = await saveRfqLineEdits(projectId, rfq.id, JSON.stringify({ changes }));
 			if (r?.error) errorThen(r.error);
-			else flashThen(`Saved ${r.saved} quote${r.saved === 1 ? '' : 's'}.`);
+			else {
+				let msg = `Saved ${r.saved} row${r.saved === 1 ? '' : 's'}.`;
+				if (r.rejected && r.rejected.length > 0) {
+					msg += ` ${r.rejected.length} rejected: ${r.rejected.map((x) => x.reason).join('; ')}`;
+				}
+				flashThen(msg);
+			}
 		});
 	}
 
@@ -243,11 +276,14 @@ export default function RfqDetailClient({ projectId, projectName, rfq, lines }: 
 			<div style={{ display: 'flex', gap: '12px', alignItems: 'center', margin: '8px 0' }}>
 				<button
 					className="primary"
-					onClick={onSaveQuotes}
+					onClick={onSaveLineEdits}
 					disabled={pending || dirtyCount === 0}
 				>
-					{pending ? 'Saving…' : `Save quoted DNs (${dirtyCount} edited)`}
+					{pending ? 'Saving…' : `Save changes (${dirtyCount} row${dirtyCount === 1 ? '' : 's'} edited)`}
 				</button>
+				<span className="muted">
+					Tab between cells. Edit QTY and/or QUOTED DN inline, then Save.
+				</span>
 			</div>
 
 			<table className="plain" style={{ fontSize: '12px' }}>
@@ -262,36 +298,64 @@ export default function RfqDetailClient({ projectId, projectName, rfq, lines }: 
 					</tr>
 				</thead>
 				<tbody>
-					{lines.map((l) => (
-						<tr key={l.id}>
-							<td>{l.typeNameSnapshot}</td>
-							<td>{l.catalogNoSnapshot}</td>
-							<td>{l.manufacturerNameSnapshot ?? '—'}</td>
-							<td style={{ textAlign: 'right' }}>{l.qtySnapshot ?? '—'}</td>
-							<td style={{ textAlign: 'right' }}>
-								<input
-									type="number"
-									step="0.01"
-									value={edits[l.id] ?? ''}
-									onChange={(e) => setEdits({ ...edits, [l.id]: e.target.value })}
-									style={{ width: '100px', textAlign: 'right' }}
-									placeholder="—"
-									disabled={pending}
-								/>
-							</td>
-							<td>
-								{l.appliedToQapAt ? (
-									<span className="muted">Applied to QAP</span>
-								) : l.quotedDn !== null ? (
-									<button onClick={() => onApplyOne(l.id)} disabled={pending}>
-										Apply to QAP
-									</button>
-								) : (
-									<span className="muted">no quote yet</span>
-								)}
-							</td>
-						</tr>
-					))}
+					{lines.map((l) => {
+						const qtyDirty = (qtyEdits[l.id] ?? '') !== (l.qtySnapshot ?? '');
+						const quotedDirty = (quotedEdits[l.id] ?? '') !== (l.quotedDn ?? '');
+						const dirtyBg = qtyDirty || quotedDirty ? '#fff3cd' : undefined;
+						return (
+							<tr key={l.id} style={dirtyBg ? { background: dirtyBg } : undefined}>
+								<td>{l.typeNameSnapshot}</td>
+								<td>{l.catalogNoSnapshot}</td>
+								<td>{l.manufacturerNameSnapshot ?? '—'}</td>
+								<td style={{ textAlign: 'right' }}>
+									<input
+										type="number"
+										step="1"
+										min="0"
+										value={qtyEdits[l.id] ?? ''}
+										onChange={(e) => setQtyEdits({ ...qtyEdits, [l.id]: e.target.value })}
+										style={{
+											width: '70px',
+											textAlign: 'right',
+											background: qtyDirty ? '#fff' : 'transparent',
+											border: qtyDirty ? '1px solid #856404' : '1px solid transparent'
+										}}
+										placeholder="—"
+										disabled={pending}
+									/>
+								</td>
+								<td style={{ textAlign: 'right' }}>
+									<input
+										type="number"
+										step="0.01"
+										value={quotedEdits[l.id] ?? ''}
+										onChange={(e) =>
+											setQuotedEdits({ ...quotedEdits, [l.id]: e.target.value })
+										}
+										style={{
+											width: '100px',
+											textAlign: 'right',
+											background: quotedDirty ? '#fff' : 'transparent',
+											border: quotedDirty ? '1px solid #856404' : '1px solid transparent'
+										}}
+										placeholder="—"
+										disabled={pending}
+									/>
+								</td>
+								<td>
+									{l.appliedToQapAt ? (
+										<span className="muted">Applied to QAP</span>
+									) : l.quotedDn !== null ? (
+										<button onClick={() => onApplyOne(l.id)} disabled={pending}>
+											Apply to QAP
+										</button>
+									) : (
+										<span className="muted">no quote yet</span>
+									)}
+								</td>
+							</tr>
+						);
+					})}
 				</tbody>
 			</table>
 

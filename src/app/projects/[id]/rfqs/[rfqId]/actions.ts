@@ -37,52 +37,89 @@ export async function updateRfqStatus(projectId: string, rfqId: string, newStatu
 	return { ok: true };
 }
 
-const QuoteSchema = z.object({
+const LineEditSchema = z.object({
 	id: z.string().uuid(),
-	quotedDn: z.string()
+	fields: z.object({
+		qty: z.string().optional(),
+		quotedDn: z.string().optional()
+	})
 });
 
-const SaveQuotesSchema = z.object({
-	quotes: z.array(QuoteSchema)
+const SaveLineEditsSchema = z.object({
+	changes: z.array(LineEditSchema)
 });
 
-export type SaveQuotesResult = {
+export type SaveLineEditsResult = {
 	saved?: number;
+	rejected?: { id: string; reason: string }[];
 	error?: string;
 };
 
-export async function saveQuotes(
+/**
+ * Bulk-save edits to any RFQ line fields PMs can adjust pre-quote:
+ *  - qty (qtySnapshot) — the qty being requested on this RFQ
+ *  - quotedDn — the price the rep came back with
+ *
+ * Empty string clears the value (sets null). Non-numeric values are rejected
+ * per-row, others commit. One transaction equivalent: each row is independent.
+ */
+export async function saveRfqLineEdits(
 	projectId: string,
 	rfqId: string,
 	payloadJson: string
-): Promise<SaveQuotesResult> {
+): Promise<SaveLineEditsResult> {
 	await requireUser();
-	let payload: z.infer<typeof SaveQuotesSchema>;
+	let payload: z.infer<typeof SaveLineEditsSchema>;
 	try {
-		payload = SaveQuotesSchema.parse(JSON.parse(payloadJson));
+		payload = SaveLineEditsSchema.parse(JSON.parse(payloadJson));
 	} catch {
-		return { error: 'Invalid quotes payload' };
+		return { error: 'Invalid payload format' };
 	}
 
 	let saved = 0;
-	for (const q of payload.quotes) {
-		const raw = q.quotedDn.trim();
-		// Allow empty to clear the quoted_dn
-		const value = raw === '' ? null : raw;
-		if (value !== null && !Number.isFinite(Number(value))) continue;
+	const rejected: { id: string; reason: string }[] = [];
+
+	for (const change of payload.changes) {
+		const updates: Record<string, unknown> = {};
+		let bad = false;
+
+		if (change.fields.qty !== undefined) {
+			const raw = change.fields.qty.trim();
+			if (raw === '') {
+				updates.qtySnapshot = null;
+			} else if (Number.isFinite(Number(raw)) && Number(raw) >= 0) {
+				updates.qtySnapshot = raw;
+			} else {
+				rejected.push({ id: change.id, reason: 'qty: must be a non-negative number' });
+				bad = true;
+			}
+		}
+
+		if (!bad && change.fields.quotedDn !== undefined) {
+			const raw = change.fields.quotedDn.trim();
+			if (raw === '') {
+				updates.quotedDn = null;
+				updates.quoteReceivedAt = null;
+			} else if (Number.isFinite(Number(raw))) {
+				updates.quotedDn = raw;
+				updates.quoteReceivedAt = new Date();
+			} else {
+				rejected.push({ id: change.id, reason: 'quotedDn: must be a number' });
+				bad = true;
+			}
+		}
+
+		if (bad || Object.keys(updates).length === 0) continue;
 
 		await db
 			.update(rfqLines)
-			.set({
-				quotedDn: value,
-				quoteReceivedAt: value !== null ? new Date() : null
-			})
-			.where(and(eq(rfqLines.id, q.id), eq(rfqLines.rfqId, rfqId)));
+			.set(updates)
+			.where(and(eq(rfqLines.id, change.id), eq(rfqLines.rfqId, rfqId)));
 		saved++;
 	}
 
 	revalidatePath(`/projects/${projectId}/rfqs/${rfqId}`);
-	return { saved };
+	return { saved, rejected };
 }
 
 export type ApplyToQapResult = {
