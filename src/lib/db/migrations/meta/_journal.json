@@ -22,6 +22,13 @@
       "when": 1778716725501,
       "tag": "0002_jazzy_wolf_cub",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1778775455011,
+      "tag": "0003_sturdy_tombstone",
+      "breakpoints": true
     }
   ]
 }

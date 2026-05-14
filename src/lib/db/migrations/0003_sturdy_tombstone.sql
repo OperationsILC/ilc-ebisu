@@ -1,0 +1,1 @@
+ALTER TABLE "rfq_lines" ADD COLUMN "qty_type" text;

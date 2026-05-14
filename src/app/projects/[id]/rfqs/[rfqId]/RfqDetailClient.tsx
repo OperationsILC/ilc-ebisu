@@ -6,8 +6,13 @@ import {
 	saveRfqLineEdits,
 	applyQuoteToQap,
 	applyAllQuotesToQap,
-	sendRfqEmail
+	sendRfqEmail,
+	addLinesToRfq
 } from './actions';
+
+// Common qty-type values surfaced as datalist suggestions. PMs can pick or
+// type custom values; the field is free text in the DB.
+const QTY_TYPE_SUGGESTIONS = ['EA', 'LF', 'FT', 'KIT', 'SET', 'ROLL', 'BOX', 'PCS'];
 
 type Rfq = {
 	id: string;
@@ -24,6 +29,7 @@ type Line = {
 	id: string;
 	qapLineId: string;
 	qtySnapshot: string | null;
+	qtyType: string | null;
 	typeNameSnapshot: string | null;
 	catalogNoSnapshot: string | null;
 	manufacturerNameSnapshot: string | null;
@@ -33,14 +39,31 @@ type Line = {
 	appliedToQapAt: string | null;
 };
 
+type AvailableLine = {
+	id: string;
+	type: string;
+	catalogNo: string;
+	manufacturer: string | null;
+	qty: string | null;
+	currentDn: string | null;
+	description: string | null;
+};
+
 type Props = {
 	projectId: string;
 	projectName: string;
 	rfq: Rfq;
 	lines: Line[];
+	availableLines: AvailableLine[];
 };
 
-export default function RfqDetailClient({ projectId, projectName, rfq, lines }: Props) {
+export default function RfqDetailClient({
+	projectId,
+	projectName,
+	rfq,
+	lines,
+	availableLines
+}: Props) {
 	const [pending, startTransition] = useTransition();
 	const [flash, setFlash] = useState<string | null>(null);
 	const [error, setError] = useState<string | null>(null);
@@ -54,6 +77,9 @@ export default function RfqDetailClient({ projectId, projectName, rfq, lines }: 
 	const [quotedEdits, setQuotedEdits] = useState<Record<string, string>>(() =>
 		Object.fromEntries(lines.map((l) => [l.id, l.quotedDn ?? '']))
 	);
+	const [qtyTypeEdits, setQtyTypeEdits] = useState<Record<string, string>>(() =>
+		Object.fromEntries(lines.map((l) => [l.id, l.qtyType ?? '']))
+	);
 
 	const dirtyCount = useMemo(() => {
 		let n = 0;
@@ -62,10 +88,17 @@ export default function RfqDetailClient({ projectId, projectName, rfq, lines }: 
 			const origQty = l.qtySnapshot ?? '';
 			const quoted = quotedEdits[l.id] ?? '';
 			const origQuoted = l.quotedDn ?? '';
-			if (qty !== origQty || quoted !== origQuoted) n++;
+			const qtyType = qtyTypeEdits[l.id] ?? '';
+			const origQtyType = l.qtyType ?? '';
+			if (qty !== origQty || quoted !== origQuoted || qtyType !== origQtyType) n++;
 		}
 		return n;
-	}, [qtyEdits, quotedEdits, lines]);
+	}, [qtyEdits, quotedEdits, qtyTypeEdits, lines]);
+
+	// Add-from-QAP selection state
+	const [addSelected, setAddSelected] = useState<Set<string>>(new Set());
+	const [addFilter, setAddFilter] = useState('');
+	const [addOpen, setAddOpen] = useState(false);
 
 	// Effective qty for totals: dirty edit takes precedence over snapshot.
 	function effectiveQty(l: Line): number {
@@ -127,15 +160,21 @@ export default function RfqDetailClient({ projectId, projectName, rfq, lines }: 
 	}
 
 	function onSaveLineEdits() {
-		const changes: { id: string; fields: { qty?: string; quotedDn?: string } }[] = [];
+		const changes: {
+			id: string;
+			fields: { qty?: string; quotedDn?: string; qtyType?: string };
+		}[] = [];
 		for (const l of lines) {
 			const qty = qtyEdits[l.id] ?? '';
 			const origQty = l.qtySnapshot ?? '';
 			const quoted = quotedEdits[l.id] ?? '';
 			const origQuoted = l.quotedDn ?? '';
-			const fields: { qty?: string; quotedDn?: string } = {};
+			const qtyType = qtyTypeEdits[l.id] ?? '';
+			const origQtyType = l.qtyType ?? '';
+			const fields: { qty?: string; quotedDn?: string; qtyType?: string } = {};
 			if (qty !== origQty) fields.qty = qty;
 			if (quoted !== origQuoted) fields.quotedDn = quoted;
+			if (qtyType !== origQtyType) fields.qtyType = qtyType;
 			if (Object.keys(fields).length > 0) changes.push({ id: l.id, fields });
 		}
 		if (changes.length === 0) {
@@ -161,6 +200,24 @@ export default function RfqDetailClient({ projectId, projectName, rfq, lines }: 
 			const r = await applyQuoteToQap(projectId, rfq.id, rfqLineId);
 			if (r?.error) errorThen(r.error);
 			else flashThen('Applied to QAP.');
+		});
+	}
+
+	function onAddLines() {
+		if (addSelected.size === 0) {
+			flashThen('No lines selected.');
+			return;
+		}
+		startTransition(async () => {
+			const r = await addLinesToRfq(projectId, rfq.id, Array.from(addSelected));
+			if (r?.error) errorThen(r.error);
+			else {
+				let msg = `Added ${r.added} line${r.added === 1 ? '' : 's'} to RFQ.`;
+				if (r.skipped && r.skipped > 0) msg += ` ${r.skipped} skipped (already on RFQ).`;
+				flashThen(msg);
+				setAddSelected(new Set());
+				setAddOpen(false);
+			}
 		});
 	}
 
@@ -286,6 +343,12 @@ export default function RfqDetailClient({ projectId, projectName, rfq, lines }: 
 				</span>
 			</div>
 
+			<datalist id="qty-type-suggestions">
+				{QTY_TYPE_SUGGESTIONS.map((s) => (
+					<option key={s} value={s} />
+				))}
+			</datalist>
+
 			<table className="plain" style={{ fontSize: '12px' }}>
 				<thead>
 					<tr>
@@ -293,6 +356,7 @@ export default function RfqDetailClient({ projectId, projectName, rfq, lines }: 
 						<th>CATALOG #</th>
 						<th>MANUFACTURER</th>
 						<th style={{ textAlign: 'right' }}>QTY</th>
+						<th style={{ width: '80px' }}>QTY TYPE</th>
 						<th style={{ textAlign: 'right' }}>QUOTED DN</th>
 						<th style={{ width: '160px' }}>Status</th>
 					</tr>
@@ -301,7 +365,8 @@ export default function RfqDetailClient({ projectId, projectName, rfq, lines }: 
 					{lines.map((l) => {
 						const qtyDirty = (qtyEdits[l.id] ?? '') !== (l.qtySnapshot ?? '');
 						const quotedDirty = (quotedEdits[l.id] ?? '') !== (l.quotedDn ?? '');
-						const dirtyBg = qtyDirty || quotedDirty ? '#fff3cd' : undefined;
+						const qtyTypeDirty = (qtyTypeEdits[l.id] ?? '') !== (l.qtyType ?? '');
+						const dirtyBg = qtyDirty || quotedDirty || qtyTypeDirty ? '#fff3cd' : undefined;
 						return (
 							<tr key={l.id} style={dirtyBg ? { background: dirtyBg } : undefined}>
 								<td>{l.typeNameSnapshot}</td>
@@ -319,6 +384,24 @@ export default function RfqDetailClient({ projectId, projectName, rfq, lines }: 
 											textAlign: 'right',
 											background: qtyDirty ? '#fff' : 'transparent',
 											border: qtyDirty ? '1px solid #856404' : '1px solid transparent'
+										}}
+										placeholder="—"
+										disabled={pending}
+									/>
+								</td>
+								<td>
+									<input
+										type="text"
+										list="qty-type-suggestions"
+										value={qtyTypeEdits[l.id] ?? ''}
+										onChange={(e) =>
+											setQtyTypeEdits({ ...qtyTypeEdits, [l.id]: e.target.value })
+										}
+										style={{
+											width: '70px',
+											background: qtyTypeDirty ? '#fff' : 'transparent',
+											border: qtyTypeDirty ? '1px solid #856404' : '1px solid transparent',
+											textTransform: 'uppercase'
 										}}
 										placeholder="—"
 										disabled={pending}
@@ -359,9 +442,104 @@ export default function RfqDetailClient({ projectId, projectName, rfq, lines }: 
 				</tbody>
 			</table>
 
+			<h2 style={{ marginTop: '32px' }}>Add lines from QAP</h2>
+			{availableLines.length === 0 ? (
+				<p className="muted">
+					Every QAP line on this project is already on this RFQ — no more to add.
+				</p>
+			) : !addOpen ? (
+				<button onClick={() => setAddOpen(true)}>
+					Browse {availableLines.length} unused QAP line{availableLines.length === 1 ? '' : 's'}
+				</button>
+			) : (
+				<>
+					<div
+						style={{
+							display: 'flex',
+							gap: '12px',
+							alignItems: 'center',
+							margin: '12px 0',
+							flexWrap: 'wrap'
+						}}
+					>
+						<button
+							className="primary"
+							onClick={onAddLines}
+							disabled={pending || addSelected.size === 0}
+						>
+							{pending
+								? 'Adding…'
+								: `Add to RFQ (${addSelected.size} line${addSelected.size === 1 ? '' : 's'})`}
+						</button>
+						<button onClick={() => setAddOpen(false)} disabled={pending}>
+							Close
+						</button>
+						<input
+							type="text"
+							placeholder="Filter by TYPE, CATALOG, mfr, description…"
+							value={addFilter}
+							onChange={(e) => setAddFilter(e.target.value)}
+							style={{ minWidth: '260px' }}
+						/>
+						<span className="dirty-badge">{addSelected.size} selected</span>
+					</div>
+
+					<table className="plain" style={{ fontSize: '12px' }}>
+						<thead>
+							<tr>
+								<th style={{ width: '32px' }}></th>
+								<th>TYPE</th>
+								<th>CATALOG #</th>
+								<th>MANUFACTURER</th>
+								<th style={{ textAlign: 'right' }}>QTY</th>
+								<th style={{ textAlign: 'right' }}>CURRENT DN</th>
+								<th>Description</th>
+							</tr>
+						</thead>
+						<tbody>
+							{availableLines
+								.filter((a) => {
+									const f = addFilter.trim().toLowerCase();
+									if (!f) return true;
+									return [a.type, a.catalogNo, a.manufacturer ?? '', a.description ?? '']
+										.join(' ')
+										.toLowerCase()
+										.includes(f);
+								})
+								.map((a) => (
+									<tr
+										key={a.id}
+										style={addSelected.has(a.id) ? { background: '#fff3cd' } : undefined}
+									>
+										<td>
+											<input
+												type="checkbox"
+												checked={addSelected.has(a.id)}
+												onChange={() => {
+													const next = new Set(addSelected);
+													if (next.has(a.id)) next.delete(a.id);
+													else next.add(a.id);
+													setAddSelected(next);
+												}}
+											/>
+										</td>
+										<td>{a.type}</td>
+										<td>{a.catalogNo}</td>
+										<td>{a.manufacturer ?? '—'}</td>
+										<td style={{ textAlign: 'right' }}>{a.qty ?? '—'}</td>
+										<td style={{ textAlign: 'right' }}>{a.currentDn ?? '—'}</td>
+										<td className="muted" style={{ maxWidth: '320px' }}>
+											{a.description ?? ''}
+										</td>
+									</tr>
+								))}
+						</tbody>
+					</table>
+				</>
+			)}
+
 			<p className="muted" style={{ marginTop: '24px' }}>
-				PDF generation and email send to the rep are next. For now, RFQs work as internal records
-				with status tracking and per-line quote entry.
+				PDF generation is next. Email already works.
 			</p>
 		</>
 	);

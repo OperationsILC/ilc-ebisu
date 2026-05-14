@@ -1,6 +1,15 @@
 import { db } from '@/lib/db';
-import { rfqs, rfqLines, projects, companies, users } from '@/lib/db/schema';
-import { eq, and } from 'drizzle-orm';
+import {
+	rfqs,
+	rfqLines,
+	projects,
+	companies,
+	users,
+	qapLines,
+	products,
+	types
+} from '@/lib/db/schema';
+import { eq, and, notInArray, sql } from 'drizzle-orm';
 import { notFound } from 'next/navigation';
 import RfqDetailClient from './RfqDetailClient';
 
@@ -40,6 +49,7 @@ export default async function RfqDetailPage({
 		id: l.id,
 		qapLineId: l.qapLineId,
 		qtySnapshot: l.qtySnapshot,
+		qtyType: l.qtyType,
 		typeNameSnapshot: l.typeNameSnapshot,
 		catalogNoSnapshot: l.catalogNoSnapshot,
 		manufacturerNameSnapshot: l.manufacturerNameSnapshot,
@@ -48,6 +58,33 @@ export default async function RfqDetailPage({
 		quoteReceivedAt: l.quoteReceivedAt?.toISOString() ?? null,
 		appliedToQapAt: l.appliedToQapAt?.toISOString() ?? null
 	}));
+
+	// QAP lines on this project that are NOT yet on this RFQ — the "add more"
+	// pool. Exclude any qap_line already attached to this RFQ.
+	const alreadyOnRfq = lines.map((l) => l.qapLineId).filter((x): x is string => x !== null);
+	const availableLines = await db
+		.select({
+			id: qapLines.id,
+			type: types.name,
+			catalogNo: products.catalogNo,
+			manufacturer: companies.name,
+			qty: qapLines.qty,
+			currentDn: qapLines.currentDn,
+			description: qapLines.description
+		})
+		.from(qapLines)
+		.innerJoin(types, eq(qapLines.typeId, types.id))
+		.innerJoin(products, eq(qapLines.productId, products.id))
+		.leftJoin(companies, eq(products.manufacturerCompanyId, companies.id))
+		.where(
+			and(
+				eq(qapLines.projectId, id),
+				alreadyOnRfq.length > 0
+					? notInArray(qapLines.id, alreadyOnRfq)
+					: sql`true`
+			)
+		)
+		.orderBy(companies.name, types.name, products.catalogNo);
 
 	const r = rfqRow.rfq;
 	return (
@@ -65,6 +102,7 @@ export default async function RfqDetailPage({
 				creatorEmail: rfqRow.creatorEmail
 			}}
 			lines={safeLines}
+			availableLines={availableLines}
 		/>
 	);
 }

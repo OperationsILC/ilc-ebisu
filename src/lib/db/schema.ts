@@ -404,9 +404,13 @@ export const rfqLines = pgTable(
 			.notNull()
 			.references(() => qapLines.id, { onDelete: 'restrict' }),
 
-		// Snapshot of QAP values at RFQ creation. Keeps the RFQ historically
-		// stable even if the QAP is later edited.
+		// Snapshot of QAP values at RFQ creation. qtySnapshot is editable
+		// per-RFQ (PMs commonly adjust the requested qty before sending);
+		// the other snapshot fields are read-only.
 		qtySnapshot: numeric('qty_snapshot'),
+		// Unit of measure for qty: EA, LF, KIT, SET, etc. Free text; common
+		// values surfaced as a datalist in the UI.
+		qtyType: text('qty_type'),
 		typeNameSnapshot: text('type_name_snapshot'),
 		catalogNoSnapshot: text('catalog_no_snapshot'),
 		manufacturerNameSnapshot: text('manufacturer_name_snapshot'),

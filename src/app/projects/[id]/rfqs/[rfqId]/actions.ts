@@ -1,9 +1,19 @@
 'use server';
 
 import { db } from '@/lib/db';
-import { rfqs, rfqLines, qapLines, auditCells, companies, projects, users } from '@/lib/db/schema';
+import {
+	rfqs,
+	rfqLines,
+	qapLines,
+	auditCells,
+	companies,
+	projects,
+	users,
+	products,
+	types
+} from '@/lib/db/schema';
 import { requireUser } from '@/lib/dal';
-import { and, eq, sql } from 'drizzle-orm';
+import { and, eq, inArray, sql } from 'drizzle-orm';
 import { revalidatePath } from 'next/cache';
 import { z } from 'zod';
 import { sendEmail } from '@/lib/email';
@@ -41,7 +51,8 @@ const LineEditSchema = z.object({
 	id: z.string().uuid(),
 	fields: z.object({
 		qty: z.string().optional(),
-		quotedDn: z.string().optional()
+		quotedDn: z.string().optional(),
+		qtyType: z.string().optional()
 	})
 });
 
@@ -107,6 +118,11 @@ export async function saveRfqLineEdits(
 				rejected.push({ id: change.id, reason: 'quotedDn: must be a number' });
 				bad = true;
 			}
+		}
+
+		if (!bad && change.fields.qtyType !== undefined) {
+			const raw = change.fields.qtyType.trim();
+			updates.qtyType = raw === '' ? null : raw;
 		}
 
 		if (bad || Object.keys(updates).length === 0) continue;
@@ -202,6 +218,84 @@ export async function applyQuoteToQap(
  * Apply every rfq_line in this RFQ that has a quoted_dn and hasn't been
  * applied yet. One transaction's worth of QAP writes.
  */
+export type AddLinesResult = {
+	added?: number;
+	skipped?: number;
+	error?: string;
+};
+
+/**
+ * Add QAP lines to an existing RFQ. Snapshots the QAP values at add time.
+ * Lines already on this RFQ are silently skipped (via the unique constraint
+ * on rfq_id + qap_line_id).
+ */
+export async function addLinesToRfq(
+	projectId: string,
+	rfqId: string,
+	qapLineIds: string[]
+): Promise<AddLinesResult> {
+	await requireUser();
+	if (qapLineIds.length === 0) return { error: 'No lines selected' };
+
+	const rfq = (
+		await db
+			.select()
+			.from(rfqs)
+			.where(and(eq(rfqs.id, rfqId), eq(rfqs.projectId, projectId)))
+			.limit(1)
+	)[0];
+	if (!rfq) return { error: 'RFQ not found' };
+
+	// Fetch QAP line data to snapshot. Verify each belongs to this project.
+	const lines = await db
+		.select({
+			id: qapLines.id,
+			projectId: qapLines.projectId,
+			qty: qapLines.qty,
+			typeName: types.name,
+			catalogNo: products.catalogNo,
+			manufacturer: companies.name,
+			description: qapLines.description
+		})
+		.from(qapLines)
+		.innerJoin(types, eq(qapLines.typeId, types.id))
+		.innerJoin(products, eq(qapLines.productId, products.id))
+		.leftJoin(companies, eq(products.manufacturerCompanyId, companies.id))
+		.where(inArray(qapLines.id, qapLineIds));
+
+	const wrongProject = lines.filter((l) => l.projectId !== projectId);
+	if (wrongProject.length > 0) {
+		return { error: 'Some selected lines do not belong to this project. Refresh and try again.' };
+	}
+
+	let added = 0;
+	let skipped = 0;
+	for (const l of lines) {
+		try {
+			await db.insert(rfqLines).values({
+				rfqId,
+				qapLineId: l.id,
+				qtySnapshot: l.qty,
+				typeNameSnapshot: l.typeName,
+				catalogNoSnapshot: l.catalogNo,
+				manufacturerNameSnapshot: l.manufacturer,
+				descriptionSnapshot: l.description
+			});
+			added++;
+		} catch (err) {
+			// Likely unique-constraint violation (line already on this RFQ).
+			if (err instanceof Error && err.message.toLowerCase().includes('unique')) {
+				skipped++;
+			} else {
+				throw err;
+			}
+		}
+	}
+
+	revalidatePath(`/projects/${projectId}/rfqs/${rfqId}`);
+	return { added, skipped };
+}
+
 export type SendRfqResult = {
 	ok?: boolean;
 	error?: string;
