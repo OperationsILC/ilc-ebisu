@@ -1,11 +1,13 @@
 'use server';
 
 import { db } from '@/lib/db';
-import { rfqs, rfqLines, qapLines, auditCells } from '@/lib/db/schema';
+import { rfqs, rfqLines, qapLines, auditCells, companies, projects, users } from '@/lib/db/schema';
 import { requireUser } from '@/lib/dal';
 import { and, eq, sql } from 'drizzle-orm';
 import { revalidatePath } from 'next/cache';
 import { z } from 'zod';
+import { sendEmail } from '@/lib/email';
+import { renderRfqEmailHtml, renderRfqEmailText } from '@/lib/rfq-email';
 
 const VALID_STATUSES = ['draft', 'sent', 'quoted', 'accepted', 'declined', 'cancelled'] as const;
 type RfqStatus = (typeof VALID_STATUSES)[number];
@@ -163,6 +165,127 @@ export async function applyQuoteToQap(
  * Apply every rfq_line in this RFQ that has a quoted_dn and hasn't been
  * applied yet. One transaction's worth of QAP writes.
  */
+export type SendRfqResult = {
+	ok?: boolean;
+	error?: string;
+	redirectedTo?: string[];
+	sentTo?: string[];
+};
+
+/**
+ * Send this RFQ via email to the rep firm's quoteEmails. Updates the RFQ
+ * status to 'sent' and stamps sent_at. If DEV_EMAIL_REDIRECT is set, the
+ * email goes there instead — see lib/email.ts.
+ */
+export async function sendRfqEmail(projectId: string, rfqId: string): Promise<SendRfqResult> {
+	const user = await requireUser();
+
+	// Gather all the data the email needs.
+	const rfq = (
+		await db
+			.select({
+				rfqNo: rfqs.rfqNo,
+				notes: rfqs.notes,
+				status: rfqs.status,
+				repFirmId: rfqs.repFirmCompanyId
+			})
+			.from(rfqs)
+			.where(and(eq(rfqs.id, rfqId), eq(rfqs.projectId, projectId)))
+			.limit(1)
+	)[0];
+	if (!rfq) return { error: 'RFQ not found' };
+
+	if (!rfq.repFirmId) return { error: 'No rep firm assigned to this RFQ' };
+
+	const repFirm = (
+		await db
+			.select({ name: companies.name, quoteEmails: companies.quoteEmails })
+			.from(companies)
+			.where(eq(companies.id, rfq.repFirmId))
+			.limit(1)
+	)[0];
+	if (!repFirm) return { error: 'Rep firm not found' };
+
+	const toList = (repFirm.quoteEmails ?? '')
+		.split(/[,;\s]+/)
+		.map((s) => s.trim())
+		.filter((s) => /@/.test(s));
+	if (toList.length === 0) {
+		return {
+			error: `Rep firm "${repFirm.name}" has no quote_emails set. Open the companies record and add an email before sending.`
+		};
+	}
+
+	const project = (
+		await db.select({ name: projects.name }).from(projects).where(eq(projects.id, projectId)).limit(1)
+	)[0];
+	if (!project) return { error: 'Project not found' };
+
+	const pm = (await db.select().from(users).where(eq(users.id, user.id)).limit(1))[0];
+	const pmName = pm?.name ?? null;
+	const pmEmail = pm?.email ?? user.email;
+
+	const lines = await db
+		.select({
+			type: rfqLines.typeNameSnapshot,
+			catalogNo: rfqLines.catalogNoSnapshot,
+			manufacturer: rfqLines.manufacturerNameSnapshot,
+			qty: rfqLines.qtySnapshot,
+			description: rfqLines.descriptionSnapshot
+		})
+		.from(rfqLines)
+		.where(eq(rfqLines.rfqId, rfqId))
+		.orderBy(
+			rfqLines.manufacturerNameSnapshot,
+			rfqLines.typeNameSnapshot,
+			rfqLines.catalogNoSnapshot
+		);
+
+	if (lines.length === 0) return { error: 'RFQ has no lines to quote' };
+
+	const appUrl = process.env.AUTH_URL ?? '';
+	const rfqUrl = appUrl ? `${appUrl}/projects/${projectId}/rfqs/${rfqId}` : '';
+
+	const ctx = {
+		rfqNo: rfq.rfqNo,
+		projectName: project.name,
+		repFirmName: repFirm.name,
+		pmName,
+		pmEmail,
+		notes: rfq.notes,
+		lines,
+		appUrl,
+		rfqUrl
+	};
+
+	const result = await sendEmail({
+		to: toList,
+		replyTo: pmEmail,
+		subject: `RFQ ${rfq.rfqNo} — ${project.name}`,
+		html: renderRfqEmailHtml(ctx),
+		text: renderRfqEmailText(ctx)
+	});
+
+	if (!result.ok) {
+		return { error: result.error ?? 'Email send failed' };
+	}
+
+	// Update RFQ status to 'sent' (only if still draft — don't clobber later states).
+	await db
+		.update(rfqs)
+		.set({ status: rfq.status === 'draft' ? 'sent' : rfq.status, sentAt: new Date(), updatedAt: new Date() })
+		.where(and(eq(rfqs.id, rfqId), eq(rfqs.projectId, projectId)));
+
+	revalidatePath(`/projects/${projectId}/rfqs/${rfqId}`);
+	revalidatePath(`/projects/${projectId}/rfqs`);
+
+	return {
+		ok: true,
+		sentTo: toList,
+		redirectedTo: result.redirectedTo
+	};
+}
+
 export async function applyAllQuotesToQap(
 	projectId: string,
 	rfqId: string

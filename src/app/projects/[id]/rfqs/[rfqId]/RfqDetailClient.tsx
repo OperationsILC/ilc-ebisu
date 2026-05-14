@@ -5,7 +5,8 @@ import {
 	updateRfqStatus,
 	saveQuotes,
 	applyQuoteToQap,
-	applyAllQuotesToQap
+	applyAllQuotesToQap,
+	sendRfqEmail
 } from './actions';
 
 type Rfq = {
@@ -89,6 +90,23 @@ export default function RfqDetailClient({ projectId, projectName, rfq, lines }: 
 		});
 	}
 
+	function onSendEmail() {
+		if (
+			!confirm(
+				`Send RFQ ${rfq.rfqNo} via email to ${rfq.repFirm ?? 'the rep firm'}? The email goes to whatever quote-emails are configured on that company. (If DEV_EMAIL_REDIRECT is set, it goes there instead.)`
+			)
+		)
+			return;
+		startTransition(async () => {
+			const r = await sendRfqEmail(projectId, rfq.id);
+			if (r?.error) errorThen(r.error);
+			else {
+				const dest = r.redirectedTo ? `${r.redirectedTo.join(', ')} (dev redirect)` : r.sentTo?.join(', ');
+				flashThen(`Email sent to ${dest}. RFQ marked as sent.`);
+			}
+		});
+	}
+
 	function onSaveQuotes() {
 		const quotes = lines
 			.map((l) => ({ id: l.id, quotedDn: edits[l.id] ?? '' }))
@@ -151,9 +169,14 @@ export default function RfqDetailClient({ projectId, projectName, rfq, lines }: 
 
 			<h2>Status & actions</h2>
 			<div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', marginBottom: '16px' }}>
+				{(rfq.status === 'draft' || rfq.status === 'sent') && (
+					<button className="primary" onClick={onSendEmail} disabled={pending}>
+						{rfq.status === 'draft' ? 'Send to rep via email' : 'Resend email'}
+					</button>
+				)}
 				{rfq.status === 'draft' && (
-					<button className="primary" onClick={() => onSetStatus('sent')} disabled={pending}>
-						Mark as sent
+					<button onClick={() => onSetStatus('sent')} disabled={pending}>
+						Mark as sent (no email)
 					</button>
 				)}
 				{rfq.status === 'sent' && linesWithQuotes > 0 && (
