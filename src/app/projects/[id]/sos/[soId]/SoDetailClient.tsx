@@ -298,9 +298,19 @@ export default function SoDetailClient({
 				<a href={`/projects/${projectId}/sos`}>← Sales Orders for {projectName}</a>
 			</p>
 
-			<h1>
-				{so.soNo} — {projectName}
-			</h1>
+			<div style={{ display: 'flex', alignItems: 'baseline', gap: '12px', flexWrap: 'wrap' }}>
+				<h1 style={{ margin: 0 }}>
+					{so.soNo} — {projectName}
+				</h1>
+				<a
+					href={`/projects/${projectId}/sos/${so.id}/pdf`}
+					target="_blank"
+					rel="noopener"
+					style={{ fontSize: '13px' }}
+				>
+					Download PDF ↗
+				</a>
+			</div>
 			<p className="muted">
 				<StatusBadge status={so.status} /> · created{' '}
 				{new Date(so.createdAt).toLocaleDateString()}

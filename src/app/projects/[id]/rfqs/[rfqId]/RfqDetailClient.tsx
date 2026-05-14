@@ -248,7 +248,17 @@ export default function RfqDetailClient({
 				<a href={`/projects/${projectId}/rfqs`}>← RFQs for {projectName}</a>
 			</p>
 
-			<h1>{rfq.rfqNo}</h1>
+			<div style={{ display: 'flex', alignItems: 'baseline', gap: '12px', flexWrap: 'wrap' }}>
+				<h1 style={{ margin: 0 }}>{rfq.rfqNo}</h1>
+				<a
+					href={`/projects/${projectId}/rfqs/${rfq.id}/pdf`}
+					target="_blank"
+					rel="noopener"
+					style={{ fontSize: '13px' }}
+				>
+					Download PDF ↗
+				</a>
+			</div>
 			<p className="muted">
 				<StatusBadge status={rfq.status} /> · {projectName} · to{' '}
 				<strong>{rfq.repFirm ?? '(no rep firm)'}</strong>

@@ -190,9 +190,19 @@ export default function PoDetailClient({
 				<a href={`/projects/${projectId}/pos`}>← Purchase Orders for {projectName}</a>
 			</p>
 
-			<h1>
-				{po.poNo} — {po.repFirm ?? '(no rep firm)'}
-			</h1>
+			<div style={{ display: 'flex', alignItems: 'baseline', gap: '12px', flexWrap: 'wrap' }}>
+				<h1 style={{ margin: 0 }}>
+					{po.poNo} — {po.repFirm ?? '(no rep firm)'}
+				</h1>
+				<a
+					href={`/projects/${projectId}/pos/${po.id}/pdf`}
+					target="_blank"
+					rel="noopener"
+					style={{ fontSize: '13px' }}
+				>
+					Download PDF ↗
+				</a>
+			</div>
 			<p className="muted">
 				<StatusBadge status={po.status} /> · {projectName} · v{po.versionNo}
 				{po.soNo && (
