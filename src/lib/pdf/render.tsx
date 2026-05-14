@@ -5,6 +5,7 @@ import { renderToBuffer } from '@react-pdf/renderer';
 import { PoPdf, type PoPdfData } from './po';
 import { SoPdf, type SoPdfData } from './so';
 import { RfqPdf, type RfqPdfData } from './rfq';
+import { InvoicePdf, type InvoicePdfData } from './invoice';
 
 export async function renderPoPdf(data: PoPdfData): Promise<Buffer> {
 	return renderToBuffer(<PoPdf data={data} />);
@@ -16,4 +17,8 @@ export async function renderSoPdf(data: SoPdfData): Promise<Buffer> {
 
 export async function renderRfqPdf(data: RfqPdfData): Promise<Buffer> {
 	return renderToBuffer(<RfqPdf data={data} />);
+}
+
+export async function renderInvoicePdf(data: InvoicePdfData): Promise<Buffer> {
+	return renderToBuffer(<InvoicePdf data={data} />);
 }

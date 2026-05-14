@@ -92,6 +92,13 @@ export const companies = pgTable('companies', {
 	creditLimit: numeric('credit_limit'),
 	parentCompanyId: uuid('parent_company_id'),
 	notes: text('notes'),
+	// QBO integration. A company can be both a Customer and a Vendor in QBO
+	// (e.g. LOGIQ SUPPLY is your manufacturer rep, but might also pay you
+	// for something one day). Filled in by a PM-driven "link to QBO" action
+	// once the QBO push integration ships. Null = not linked yet; push will
+	// refuse to send until a link exists.
+	qboCustomerId: text('qbo_customer_id'),
+	qboVendorId: text('qbo_vendor_id'),
 	createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
 	updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
 	createdByUserId: uuid('created_by_user_id').references(() => users.id)
@@ -148,35 +155,86 @@ export const projects = pgTable('projects', {
 	name: text('name').notNull().unique(),
 	status: text('status').notNull().default('active'),
 	// active | completed | test | on_hold
+	phase: text('phase'),
+	// SD | DD | CD | CA | bidding | construction | closeout
+	projectType: text('project_type'),
+	// Hospitality | Multifamily | Office | Retail | Education | ...
+
 	clientCompanyId: uuid('client_company_id').references(() => companies.id),
 	gcCompanyId: uuid('gc_company_id').references(() => companies.id),
 	designerCompanyId: uuid('designer_company_id').references(() => companies.id),
 	projectManagerUserId: uuid('project_manager_user_id').references(() => users.id),
 
-	marginPct: numeric('margin_pct'),
-	freightPct: numeric('freight_pct'),
-	warehousingPct: numeric('warehousing_pct'),
-	salesTaxPct: numeric('sales_tax_pct'),
+	// Additional staff roles surfaced on the project sheet
+	designLeadUserId: uuid('design_lead_user_id').references(() => users.id),
+	secondDesignerUserId: uuid('second_designer_user_id').references(() => users.id),
+	salesPersonUserId: uuid('sales_person_user_id').references(() => users.id),
+	caManagerUserId: uuid('ca_manager_user_id').references(() => users.id),
 
-	deliveryStreet: text('delivery_street'),
-	deliveryCity: text('delivery_city'),
-	deliveryState: text('delivery_state'),
-	deliveryZip: text('delivery_zip'),
-	siteStreet: text('site_street'),
-	siteCity: text('site_city'),
-	siteState: text('site_state'),
-	siteZip: text('site_zip'),
+	// Service offering applied to this project — Full Service Design, etc.
+	serviceType: text('service_type'),
 
-	totalSf: integer('total_sf'),
-	interiorSf: integer('interior_sf'),
-	exteriorSf: integer('exterior_sf'),
-
+	// Top-line dates
+	ifcSubDate: timestamp('ifc_sub_date', { withTimezone: true }),
+	expectedOrderDate: timestamp('expected_order_date', { withTimezone: true }),
 	designStartDate: timestamp('design_start_date', { withTimezone: true }),
 	roughInStartDate: timestamp('rough_in_start_date', { withTimezone: true }),
 	constructionStartDate: timestamp('construction_start_date', { withTimezone: true }),
 
+	// Financial defaults / overrides
+	marginPct: numeric('margin_pct'),
+	freightPct: numeric('freight_pct'),
+	warehousingPct: numeric('warehousing_pct'),
+	salesTaxPct: numeric('sales_tax_pct'),
+	salesTaxName: text('sales_tax_name'),
+	// Human label for the tax rate, e.g. "2.9% — CO STATE" or
+	// "8% — STOCKBRIDGE, GA". Mirrored to invoices at creation.
+	projectedDesignFeeTotal: numeric('projected_design_fee_total'),
+	// Top-level forecast of design fee revenue. Distinct from the
+	// running total computed from design-fee invoices.
+
+	// Project-level email overrides — when set, these win over the
+	// company-default emails (which apply when a project doesn't override)
+	emailsForBudgets: text('emails_for_budgets'),
+	emailsForQuotesSo: text('emails_for_quotes_so'),
+	emailsForShipmentUpdates: text('emails_for_shipment_updates'),
+
+	// Delivery address (where ILC ships TO — warehouse, GC, or jobsite)
+	deliveryStreet: text('delivery_street'),
+	deliveryCity: text('delivery_city'),
+	deliveryState: text('delivery_state'),
+	deliveryZip: text('delivery_zip'),
+	deliverySiteContactName: text('delivery_site_contact_name'),
+	deliverySiteContactPhone: text('delivery_site_contact_phone'),
+
+	// Job site address (the physical building — drives sales tax jurisdiction)
+	siteStreet: text('site_street'),
+	siteCity: text('site_city'),
+	siteState: text('site_state'),
+	siteZip: text('site_zip'),
+	jobSiteContactName: text('job_site_contact_name'),
+	jobSiteContactPhone: text('job_site_contact_phone'),
+
+	// Square footage — top-line + supplemental breakdowns
+	totalSf: integer('total_sf'),
+	interiorSf: integer('interior_sf'),
+	exteriorSf: integer('exterior_sf'),
+	numUnitsRooms: integer('num_units_rooms'),
+	unitRoomSf: integer('unit_room_sf'),
+	garageSf: integer('garage_sf'),
+	bohSf: integer('boh_sf'),
+	openOfficeSf: integer('open_office_sf'),
+	privateOfficeSf: integer('private_office_sf'),
+	corridorAreaSf: integer('corridor_area_sf'),
+	amenityAreaSf: integer('amenity_area_sf'),
+	unfinishedOfficeSf: integer('unfinished_office_sf'),
+
 	description: text('description'),
 	notes: text('notes'),
+	projectStats: text('project_stats'),
+	// Free-form internal note — used in TrackVia for tax/permit notes
+	// distinct from `notes` (which tends to hold scoping/design notes).
+
 	createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
 	updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
 	createdByUserId: uuid('created_by_user_id').references(() => users.id)
@@ -668,6 +726,265 @@ export const shipmentLines = pgTable(
 );
 
 // ---------------------------------------------------------------------------
+// Receivable invoices — what ILC bills the client
+// ---------------------------------------------------------------------------
+// Invoices come into existence when the PM clicks "+ New invoice" on an SO
+// (for product invoices) or on a project (for design fee / credit memo).
+// Progress billing is first-class: one SO can have many invoices, each
+// billing a subset of any order line at any qty. The "type" column
+// discriminates between product, design fee, and credit memo invoices —
+// all share the same IN##### numbering sequence so PMs see one list.
+//
+// QBO state is orthogonal to workflow state: `status` tracks ILC's view
+// (draft → sent → paid), while `qbo_status` tracks whether the invoice has
+// been pushed to the accounting book.
+
+export const invoices = pgTable('invoices', {
+	id: uuid('id').defaultRandom().primaryKey(),
+	projectId: uuid('project_id')
+		.notNull()
+		.references(() => projects.id, { onDelete: 'cascade' }),
+	salesOrderId: uuid('sales_order_id').references(() => salesOrders.id, {
+		onDelete: 'set null'
+	}),
+	// Required for type=product, NULL for type=design_fee / credit_memo.
+
+	invoiceNo: text('invoice_no').notNull().unique(),
+	// e.g. "IN00123"
+
+	type: text('type').notNull().default('product'),
+	// product | design_fee | credit_memo
+
+	status: text('status').notNull().default('draft'),
+	// draft | sent | partial_paid | paid | past_due | void
+
+	// Design fee invoices only — which phase milestone this bills.
+	designPhase: text('design_phase'),
+
+	invoiceDate: timestamp('invoice_date', { withTimezone: true }),
+	dueDate: timestamp('due_date', { withTimezone: true }),
+
+	// Per-invoice CLIENT PO # override. The project also has a master
+	// client_po_no; this one is for clients who issue separate POs per
+	// progress-billing milestone.
+	clientPoNo: text('client_po_no'),
+
+	// Sales tax — copied off the project at creation but PM can override
+	// (jobsite tax jurisdiction occasionally differs from project default).
+	salesTaxPct: numeric('sales_tax_pct'),
+	salesTaxName: text('sales_tax_name'),
+
+	// Money amounts applied against this invoice
+	depositAppliedAmount: numeric('deposit_applied_amount').default('0'),
+	creditAppliedAmount: numeric('credit_applied_amount').default('0'),
+	// `total_amount` is the gross before credits/deposits. `amount_due`
+	// = total_amount - deposit_applied_amount - credit_applied_amount.
+	// Stored explicitly to match QBO snapshot.
+	totalAmount: numeric('total_amount').default('0'),
+	amountDue: numeric('amount_due').default('0'),
+	paidAmount: numeric('paid_amount').default('0'),
+
+	sentAt: timestamp('sent_at', { withTimezone: true }),
+	paidAt: timestamp('paid_at', { withTimezone: true }),
+
+	// QBO push state
+	qboId: text('qbo_id'),
+	qboStatus: text('qbo_status').notNull().default('not_pushed'),
+	// not_pushed | queued | pushed | failed
+	qboPushedAt: timestamp('qbo_pushed_at', { withTimezone: true }),
+	qboLastError: text('qbo_last_error'),
+
+	rowVersion: bigint('row_version', { mode: 'number' }).notNull().default(1),
+	createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+	updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+	createdByUserId: uuid('created_by_user_id').references(() => users.id)
+});
+
+export const invoiceLines = pgTable(
+	'invoice_lines',
+	{
+		id: uuid('id').defaultRandom().primaryKey(),
+		invoiceId: uuid('invoice_id')
+			.notNull()
+			.references(() => invoices.id, { onDelete: 'cascade' }),
+		// For product invoices: links back to the order line being billed.
+		// For design fee / credit memo: NULL.
+		orderLineId: uuid('order_line_id').references(() => orderLines.id, {
+			onDelete: 'set null'
+		}),
+		// Optional link to a specific shipment line — useful when an invoice
+		// covers a particular delivery event.
+		shipmentLineId: uuid('shipment_line_id').references(() => shipmentLines.id, {
+			onDelete: 'set null'
+		}),
+
+		// Snapshot fields — captured at line creation, never re-pulled from
+		// source so historical invoices stay accurate even if products / SOs
+		// later change.
+		typeSnapshot: text('type_snapshot'),
+		catalogNoSnapshot: text('catalog_no_snapshot'),
+		manufacturerSnapshot: text('manufacturer_snapshot'),
+		descriptionSnapshot: text('description_snapshot'),
+
+		qtyInvoiced: numeric('qty_invoiced'),
+		// Can be less than the source order line's qty — that's progress
+		// billing. The PM can also use this for partial credit memos.
+		qtyType: text('qty_type'),
+		unitDnSnapshot: numeric('unit_dn_snapshot'),
+		unitCnSnapshot: numeric('unit_cn_snapshot'),
+		marginPctSnapshot: numeric('margin_pct_snapshot'),
+		lineTotal: numeric('line_total'),
+		// Computed at save time. Stored so QBO push and totals queries don't
+		// re-derive on every read.
+
+		// Design fee invoice lines use this instead of catalog snapshots.
+		designFeeDescription: text('design_fee_description'),
+
+		createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow()
+	},
+	(t) => [
+		index('invoice_lines_invoice_idx').on(t.invoiceId),
+		index('invoice_lines_order_line_idx').on(t.orderLineId)
+	]
+);
+
+// ---------------------------------------------------------------------------
+// Payable bills — what ILC owes manufacturers / rep firms
+// ---------------------------------------------------------------------------
+// Bills arrive via two paths:
+//   1. DocParser webhook — OCR'd from a PDF emailed to a forward-address;
+//      lands as `status='pending_review'` with the raw extracted JSON
+//      preserved on `source_parsed_json` for auditability
+//   2. Manual entry — PM fills in fields themselves
+//
+// PM reviews / corrects, then approves. On approval, QBO push fires.
+// PO number is the join key — DocParser extracts the PO# from the bill and
+// we look up the matching purchase_orders row by it.
+
+export const bills = pgTable('bills', {
+	id: uuid('id').defaultRandom().primaryKey(),
+	projectId: uuid('project_id').references(() => projects.id, { onDelete: 'cascade' }),
+	// NULL when DocParser delivers a bill we can't match to a PO yet.
+	purchaseOrderId: uuid('purchase_order_id').references(() => purchaseOrders.id, {
+		onDelete: 'set null'
+	}),
+	vendorCompanyId: uuid('vendor_company_id').references(() => companies.id),
+	// The rep firm / manufacturer that sent the bill.
+
+	billNo: text('bill_no').notNull().unique(),
+	// Our internal ID, e.g. "BL00123".
+	vendorBillNo: text('vendor_bill_no'),
+	// The number the vendor uses on their own bill PDF. Free text.
+
+	billDate: timestamp('bill_date', { withTimezone: true }),
+	dueDate: timestamp('due_date', { withTimezone: true }),
+
+	status: text('status').notNull().default('pending_review'),
+	// pending_review | approved | scheduled | paid | rejected | void
+	// 'pending_review' = DocParser dropped it here; PM hasn't looked yet
+	// 'approved' = PM verified fields against source PDF and OK'd
+	// 'scheduled' = approved and queued for payment in QBO
+	// 'paid' = QBO marked it paid
+
+	totalAmount: numeric('total_amount'),
+	paidAmount: numeric('paid_amount'),
+
+	// Free-form notes from PM (internal) — never goes anywhere external.
+	notes: text('notes'),
+
+	// Provenance for audit
+	sourcePdfUrl: text('source_pdf_url'),
+	// Where the original bill PDF lives (S3 path or DocParser ref).
+	sourceParsedJson: jsonb('source_parsed_json'),
+	// Raw extraction output. Lets PM see "what DocParser thought" if a
+	// field looks wrong, and lets us debug OCR misses.
+
+	approvedByUserId: uuid('approved_by_user_id').references(() => users.id),
+	approvedAt: timestamp('approved_at', { withTimezone: true }),
+	rejectedByUserId: uuid('rejected_by_user_id').references(() => users.id),
+	rejectedAt: timestamp('rejected_at', { withTimezone: true }),
+	rejectedReason: text('rejected_reason'),
+
+	// QBO push state (same shape as invoices)
+	qboId: text('qbo_id'),
+	qboStatus: text('qbo_status').notNull().default('not_pushed'),
+	qboPushedAt: timestamp('qbo_pushed_at', { withTimezone: true }),
+	qboLastError: text('qbo_last_error'),
+
+	rowVersion: bigint('row_version', { mode: 'number' }).notNull().default(1),
+	createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+	updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+	createdByUserId: uuid('created_by_user_id').references(() => users.id)
+});
+
+export const billLines = pgTable(
+	'bill_lines',
+	{
+		id: uuid('id').defaultRandom().primaryKey(),
+		billId: uuid('bill_id')
+			.notNull()
+			.references(() => bills.id, { onDelete: 'cascade' }),
+		// Optional FK back to the PO line we matched this bill line against.
+		// NULL = PM hasn't matched it yet (or no match exists — manufacturer
+		// billed something not on the PO).
+		orderLineId: uuid('order_line_id').references(() => orderLines.id, {
+			onDelete: 'set null'
+		}),
+
+		// What DocParser (or PM) read off the bill
+		descriptionText: text('description_text'),
+		catalogNoText: text('catalog_no_text'),
+		qty: numeric('qty'),
+		unitPrice: numeric('unit_price'),
+		lineTotal: numeric('line_total'),
+
+		notes: text('notes'),
+		createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow()
+	},
+	(t) => [
+		index('bill_lines_bill_idx').on(t.billId),
+		index('bill_lines_order_line_idx').on(t.orderLineId)
+	]
+);
+
+// ---------------------------------------------------------------------------
+// Client credits — running tally of money a client has on file
+// ---------------------------------------------------------------------------
+// Source of three flows:
+//   - DEPOSIT: client paid ahead and has a balance to draw from
+//   - CREDIT_MEMO: ILC issued a credit invoice (negative amount)
+//   - REFUND: ILC refunded money the client had previously paid
+//   - MANUAL: PM-entered adjustment for anything not the above
+//
+// Ebisu records additions and applications; the running balance is
+// computed (SUM(amount) where origin in (deposit, credit_memo, refund,
+// manual) MINUS the sum of `invoices.credit_applied_amount` where the
+// invoice cited this credit). QBO is the authoritative ledger; this is
+// just enough state for the PM workbench to suggest "client X has $Y
+// available — apply to this invoice?"
+
+export const clientCredits = pgTable('client_credits', {
+	id: uuid('id').defaultRandom().primaryKey(),
+	clientCompanyId: uuid('client_company_id')
+		.notNull()
+		.references(() => companies.id, { onDelete: 'restrict' }),
+
+	creditNo: text('credit_no').notNull().unique(),
+	// e.g. "CR00123"
+
+	amount: numeric('amount').notNull(),
+	origin: text('origin').notNull(),
+	// deposit | credit_memo | refund | manual
+	originRefInvoiceId: uuid('origin_ref_invoice_id').references(() => invoices.id, {
+		onDelete: 'set null'
+	}),
+	// Populated when origin=credit_memo and the source invoice is in Ebisu.
+	notes: text('notes'),
+	createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+	createdByUserId: uuid('created_by_user_id').references(() => users.id)
+});
+
+// ---------------------------------------------------------------------------
 // Cell-level audit log
 // ---------------------------------------------------------------------------
 // One row per cell change, not per row change. Keeps the table size proportional
@@ -715,6 +1032,16 @@ export type Shipment = typeof shipments.$inferSelect;
 export type NewShipment = typeof shipments.$inferInsert;
 export type ShipmentLine = typeof shipmentLines.$inferSelect;
 export type NewShipmentLine = typeof shipmentLines.$inferInsert;
+export type Invoice = typeof invoices.$inferSelect;
+export type NewInvoice = typeof invoices.$inferInsert;
+export type InvoiceLine = typeof invoiceLines.$inferSelect;
+export type NewInvoiceLine = typeof invoiceLines.$inferInsert;
+export type Bill = typeof bills.$inferSelect;
+export type NewBill = typeof bills.$inferInsert;
+export type BillLine = typeof billLines.$inferSelect;
+export type NewBillLine = typeof billLines.$inferInsert;
+export type ClientCredit = typeof clientCredits.$inferSelect;
+export type NewClientCredit = typeof clientCredits.$inferInsert;
 export type Company = typeof companies.$inferSelect;
 export type NewCompany = typeof companies.$inferInsert;
 export type QapLine = typeof qapLines.$inferSelect;

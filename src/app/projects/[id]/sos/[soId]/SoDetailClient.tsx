@@ -9,6 +9,7 @@ import {
 	deleteOrderLine,
 	createPosFromSo
 } from './actions';
+import { createProductInvoice } from '../../invoices/actions';
 
 const usd = new Intl.NumberFormat('en-US', {
 	style: 'currency',
@@ -105,6 +106,7 @@ export default function SoDetailClient({
 
 	// --- Header form state ---
 	const headerAction = updateSoHeader.bind(null, projectId, so.id);
+	const createInvoiceBound = createProductInvoice.bind(null, projectId, so.id);
 	const [headerState, headerFormAction, headerPending] = useActionState<
 		SoHeaderResult | undefined,
 		FormData
@@ -347,7 +349,7 @@ export default function SoDetailClient({
 			</div>
 
 			{/* === CREATE POs ACTION === */}
-			<div style={{ margin: '12px 0', display: 'flex', gap: '8px', alignItems: 'center' }}>
+			<div style={{ margin: '12px 0', display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
 				<button onClick={onCreatePos} disabled={pending || linesWithoutPo === 0}>
 					Create POs from SO ({linesWithoutPo} line{linesWithoutPo === 1 ? '' : 's'} not yet on PO)
 				</button>
@@ -356,6 +358,11 @@ export default function SoDetailClient({
 						{poCount} PO{poCount === 1 ? '' : 's'} already created — view all
 					</a>
 				)}
+				<form action={createInvoiceBound} style={{ marginLeft: 'auto' }}>
+					<button className="primary" type="submit" disabled={pending}>
+						+ New invoice from this SO
+					</button>
+				</form>
 			</div>
 
 			{/* === SO LINES === */}

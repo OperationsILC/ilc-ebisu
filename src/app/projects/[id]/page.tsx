@@ -7,7 +7,9 @@ import {
 	rfqs,
 	salesOrders,
 	purchaseOrders,
-	shipments
+	shipments,
+	invoices,
+	bills
 } from '@/lib/db/schema';
 import { eq, count, desc, sql } from 'drizzle-orm';
 import { notFound } from 'next/navigation';
@@ -65,6 +67,16 @@ export default async function ProjectDetailPage({
 		.from(shipments)
 		.where(eq(shipments.projectId, id));
 
+	const [{ invoiceCount }] = await db
+		.select({ invoiceCount: count() })
+		.from(invoices)
+		.where(eq(invoices.projectId, id));
+
+	const [{ billCount }] = await db
+		.select({ billCount: count() })
+		.from(bills)
+		.where(eq(bills.projectId, id));
+
 	// Top 5 manufacturers by line count
 	const topMfrs = await db
 		.select({
@@ -120,6 +132,12 @@ export default async function ProjectDetailPage({
 				</a>
 				<a href={`/projects/${p.id}/shipments`}>
 					<button>Shipments ({shipmentCount})</button>
+				</a>
+				<a href={`/projects/${p.id}/invoices`}>
+					<button>Invoices ({invoiceCount})</button>
+				</a>
+				<a href={`/projects/${p.id}/bills`}>
+					<button>Bills ({billCount})</button>
 				</a>
 			</div>
 

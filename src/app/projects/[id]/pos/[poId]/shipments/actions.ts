@@ -23,7 +23,7 @@ export async function createShipment(projectId: string, poId: string) {
 	if (!po) throw new Error('PO not found');
 
 	const [{ n: existing }] = await db.select({ n: count() }).from(shipments);
-	const shipmentNo = `SHP${String(Number(existing) + 1).padStart(5, '0')}`;
+	const shipmentNo = `SH${String(Number(existing) + 1).padStart(5, '0')}`;
 
 	let createdId: string | undefined;
 	try {
@@ -42,7 +42,7 @@ export async function createShipment(projectId: string, poId: string) {
 		// Tiny race window on duplicate shipment_no — retry once with bumped counter
 		if (err instanceof Error && err.message.includes('unique')) {
 			const [{ n: again }] = await db.select({ n: count() }).from(shipments);
-			const retryNo = `SHP${String(Number(again) + 1).padStart(5, '0')}`;
+			const retryNo = `SH${String(Number(again) + 1).padStart(5, '0')}`;
 			const [row] = await db
 				.insert(shipments)
 				.values({

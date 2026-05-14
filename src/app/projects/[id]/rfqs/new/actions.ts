@@ -82,7 +82,7 @@ export async function createRfq(
 	// Generate next RFQ NO. Cheap and lock-free; the unique constraint on rfq_no
 	// catches the rare race condition between two concurrent creates.
 	const [{ n: existing }] = await db.select({ n: count() }).from(rfqs);
-	const rfqNo = `RFQ${String(Number(existing) + 1).padStart(5, '0')}`;
+	const rfqNo = `RQ${String(Number(existing) + 1).padStart(5, '0')}`;
 
 	let createdRfqId: string | undefined;
 	try {
