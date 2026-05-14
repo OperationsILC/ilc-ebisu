@@ -1,0 +1,32 @@
+version: 1
+frontend:
+  phases:
+    preBuild:
+      commands:
+        # Install everything — Amplify sets NODE_ENV at runtime but we need
+        # devDeps (typescript, @types/*, etc.) during build, so override.
+        - npm ci --include=dev --cache .npm --prefer-offline
+        # Bake Amplify console env vars into .env.production so they reach
+        # the SSR Lambda at runtime. Amplify's console env vars are
+        # build-time-only by default; Next.js reads .env.production at runtime.
+        - echo "DATABASE_URL=$DATABASE_URL" >> .env.production
+        - echo "AUTH_SECRET=$AUTH_SECRET" >> .env.production
+        - echo "AUTH_GOOGLE_ID=$AUTH_GOOGLE_ID" >> .env.production
+        - echo "AUTH_GOOGLE_SECRET=$AUTH_GOOGLE_SECRET" >> .env.production
+        - echo "AUTH_ALLOWED_EMAIL_DOMAINS=$AUTH_ALLOWED_EMAIL_DOMAINS" >> .env.production
+        - echo "AUTH_URL=$AUTH_URL" >> .env.production
+        # Email send (RFQs). Add these in Amplify env vars to enable.
+        - echo "RESEND_API_KEY=$RESEND_API_KEY" >> .env.production
+        - echo "EMAIL_FROM=$EMAIL_FROM" >> .env.production
+        - echo "DEV_EMAIL_REDIRECT=$DEV_EMAIL_REDIRECT" >> .env.production
+    build:
+      commands:
+        - npm run build
+  artifacts:
+    baseDirectory: .next
+    files:
+      - '**/*'
+  cache:
+    paths:
+      - .npm/**/*
+      - node_modules/**/*
