@@ -1,5 +1,13 @@
 import { db } from '@/lib/db';
-import { projects, qapLines, products, companies, rfqs } from '@/lib/db/schema';
+import {
+	projects,
+	qapLines,
+	products,
+	companies,
+	rfqs,
+	salesOrders,
+	purchaseOrders
+} from '@/lib/db/schema';
 import { eq, count, desc, sql } from 'drizzle-orm';
 import { notFound } from 'next/navigation';
 
@@ -40,6 +48,16 @@ export default async function ProjectDetailPage({
 		.select({ rfqCount: count() })
 		.from(rfqs)
 		.where(eq(rfqs.projectId, id));
+
+	const [{ soCount }] = await db
+		.select({ soCount: count() })
+		.from(salesOrders)
+		.where(eq(salesOrders.projectId, id));
+
+	const [{ poCount }] = await db
+		.select({ poCount: count() })
+		.from(purchaseOrders)
+		.where(eq(purchaseOrders.projectId, id));
 
 	// Top 5 manufacturers by line count
 	const topMfrs = await db
@@ -87,6 +105,12 @@ export default async function ProjectDetailPage({
 				</a>
 				<a href={`/projects/${p.id}/rfqs`}>
 					<button>RFQs ({rfqCount})</button>
+				</a>
+				<a href={`/projects/${p.id}/sos`}>
+					<button>Sales Orders ({soCount})</button>
+				</a>
+				<a href={`/projects/${p.id}/pos`}>
+					<button>Purchase Orders ({poCount})</button>
 				</a>
 			</div>
 

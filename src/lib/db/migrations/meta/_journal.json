@@ -29,6 +29,13 @@
       "when": 1778775455011,
       "tag": "0003_sturdy_tombstone",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1778788025214,
+      "tag": "0004_married_wilson_fisk",
+      "breakpoints": true
     }
   ]
 }

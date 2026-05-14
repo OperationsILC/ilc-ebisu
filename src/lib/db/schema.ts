@@ -435,6 +435,159 @@ export const rfqLines = pgTable(
 );
 
 // ---------------------------------------------------------------------------
+// Sales Orders + Purchase Orders + shared order_lines
+// ---------------------------------------------------------------------------
+// An SO is the document ILC sends the contractor — CN (client-net) columns are
+// first-class. A PO is the document ILC sends the rep firm — DN (dealer-net)
+// columns are first-class. Both render the SAME line items via the order_lines
+// table: editing on either side updates the shared row. That's the
+// bidirectional-sync invariant from the brief, implemented structurally rather
+// than via application code.
+//
+// One SO can have N POs (one per rep firm when an SO needs items from multiple
+// suppliers). Each order_line has one SO (required) and at most one PO (PO is
+// nullable until "Create POs from SO" is run).
+
+export const salesOrders = pgTable('sales_orders', {
+	id: uuid('id').defaultRandom().primaryKey(),
+	projectId: uuid('project_id')
+		.notNull()
+		.references(() => projects.id, { onDelete: 'cascade' }),
+	soNo: text('so_no').notNull().unique(),
+	// e.g. "SO00001" — app-generated, monotonic per ILC tenant
+
+	status: text('status').notNull().default('draft'),
+	// draft | confirmed | shipped | invoiced | closed | cancelled
+
+	description: text('description'),
+	notes: text('notes'),
+	customEmailMessage: text('custom_email_message'),
+	procurementMgrUserId: uuid('procurement_mgr_user_id').references(() => users.id),
+
+	// Per-SO override percentages. Defaults copied from project at SO creation;
+	// PM can adjust per-SO. NULL means "fall back to project default at render."
+	marginPct: numeric('margin_pct'),
+	freightPct: numeric('freight_pct'),
+	warehousingPct: numeric('warehousing_pct'),
+	salesTaxPct: numeric('sales_tax_pct'),
+	salesTaxName: text('sales_tax_name'),
+	// Categorical bucket name from the sales-tax master list (snapshot, not FK).
+	additionalFreight: numeric('additional_freight'),
+	freightOverride: numeric('freight_override'),
+	// Dollar overrides on top of the % calculation.
+
+	sentAt: timestamp('sent_at', { withTimezone: true }),
+	confirmedAt: timestamp('confirmed_at', { withTimezone: true }),
+
+	createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+	updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+	createdByUserId: uuid('created_by_user_id').references(() => users.id)
+});
+
+export const purchaseOrders = pgTable('purchase_orders', {
+	id: uuid('id').defaultRandom().primaryKey(),
+	projectId: uuid('project_id')
+		.notNull()
+		.references(() => projects.id, { onDelete: 'cascade' }),
+	salesOrderId: uuid('sales_order_id').references(() => salesOrders.id, {
+		onDelete: 'set null'
+	}),
+	// PO may briefly survive SO deletion (rare); set null on SO deletion.
+	repFirmCompanyId: uuid('rep_firm_company_id').references(() => companies.id),
+
+	poNo: text('po_no').notNull().unique(),
+	// e.g. "PO00001"
+
+	status: text('status').notNull().default('draft'),
+	// draft | sent | acknowledged | shipped | received | closed | cancelled | dont_send
+	// 'dont_send' = "DON'T SEND PO - CREATE SHIPMENTS" — internal-only PO
+
+	description: text('description'),
+	notes: text('notes'),
+	internalNotes: text('internal_notes'),
+	// Internal notes are NEVER included in the rep email; PMs use them for
+	// freight haggling, partial-ship strategy, etc.
+	customEmailMessage: text('custom_email_message'),
+
+	addedFreight: numeric('added_freight'),
+	repQuoteNo: text('rep_quote_no'),
+	// PO-level override. Per-line rep_quote_no on order_lines is the source of
+	// truth; this is a hand-typed override when the rep references the whole PO
+	// with a single quote #.
+
+	trackingNumber: text('tracking_number'),
+	orderedDate: timestamp('ordered_date', { withTimezone: true }),
+	acknowledgedAt: timestamp('acknowledged_at', { withTimezone: true }),
+
+	// Per-PO shipping address override. Defaults blank; PM fills in for
+	// job-site direct deliveries (Tadabase examples showed contact name +
+	// company + phone + street). Stored as free text; can normalize later.
+	shipToText: text('ship_to_text'),
+	ilcOfficeAddress: text('ilc_office_address'),
+	sendFromEmail: text('send_from_email'),
+	sendToEmail: text('send_to_email'),
+
+	sentAt: timestamp('sent_at', { withTimezone: true }),
+	versionNo: integer('version_no').notNull().default(1),
+	// Incremented when a Change Order modifies the PO. CO not built yet; column
+	// exists for future without requiring a migration later.
+
+	createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+	updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+	createdByUserId: uuid('created_by_user_id').references(() => users.id)
+});
+
+export const orderLines = pgTable(
+	'order_lines',
+	{
+		id: uuid('id').defaultRandom().primaryKey(),
+		salesOrderId: uuid('sales_order_id')
+			.notNull()
+			.references(() => salesOrders.id, { onDelete: 'cascade' }),
+		purchaseOrderId: uuid('purchase_order_id').references(() => purchaseOrders.id, {
+			onDelete: 'set null'
+		}),
+		// NULL until "Create POs from SO" is run.
+
+		qapLineId: uuid('qap_line_id').references(() => qapLines.id, { onDelete: 'set null' }),
+		// Origin in QAP. Nullable so QAP deletion doesn't destroy SO/PO history.
+		rfqLineId: uuid('rfq_line_id').references(() => rfqLines.id, { onDelete: 'set null' }),
+		// Optional: the RFQ line whose quoted_dn became this line's unit_dn.
+
+		// Snapshots from QAP at line creation.
+		typeNameSnapshot: text('type_name_snapshot'),
+		catalogNoSnapshot: text('catalog_no_snapshot'),
+		manufacturerNameSnapshot: text('manufacturer_name_snapshot'),
+		descriptionSnapshot: text('description_snapshot'),
+
+		// Shared editable fields. Mutating any of these from either the SO view
+		// or the PO view updates this row — both views render fresh data on
+		// next load. That's the bidirectional sync.
+		qty: numeric('qty'),
+		qtyType: text('qty_type'),
+		unitDn: numeric('unit_dn'),
+		unitCn: numeric('unit_cn'),
+		// unit_cn = unit_dn × (1 + margin_pct/100) by default but can be hand-set
+		// to break the relationship if the PM wants to.
+		marginPct: numeric('margin_pct'),
+		// Per-line margin override. NULL means "fall back to SO's margin_pct."
+		repQuoteNo: text('rep_quote_no'),
+
+		rowVersion: bigint('row_version', { mode: 'number' }).notNull().default(1),
+		createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+		updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+		createdByUserId: uuid('created_by_user_id').references(() => users.id),
+		updatedByUserId: uuid('updated_by_user_id').references(() => users.id)
+	},
+	(t) => [
+		index('order_lines_so_idx').on(t.salesOrderId),
+		index('order_lines_po_idx').on(t.purchaseOrderId),
+		index('order_lines_qap_idx').on(t.qapLineId),
+		index('order_lines_rfq_idx').on(t.rfqLineId)
+	]
+);
+
+// ---------------------------------------------------------------------------
 // Cell-level audit log
 // ---------------------------------------------------------------------------
 // One row per cell change, not per row change. Keeps the table size proportional
@@ -472,6 +625,12 @@ export type Rfq = typeof rfqs.$inferSelect;
 export type NewRfq = typeof rfqs.$inferInsert;
 export type RfqLine = typeof rfqLines.$inferSelect;
 export type NewRfqLine = typeof rfqLines.$inferInsert;
+export type SalesOrder = typeof salesOrders.$inferSelect;
+export type NewSalesOrder = typeof salesOrders.$inferInsert;
+export type PurchaseOrder = typeof purchaseOrders.$inferSelect;
+export type NewPurchaseOrder = typeof purchaseOrders.$inferInsert;
+export type OrderLine = typeof orderLines.$inferSelect;
+export type NewOrderLine = typeof orderLines.$inferInsert;
 export type Company = typeof companies.$inferSelect;
 export type NewCompany = typeof companies.$inferInsert;
 export type QapLine = typeof qapLines.$inferSelect;
