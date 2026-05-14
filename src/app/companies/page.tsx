@@ -47,7 +47,12 @@ export default async function CompaniesListPage({
 
 	return (
 		<>
-			<h1>Companies</h1>
+			<h1>
+				Companies{' '}
+				<a href="/help/companies" target="_blank" rel="noopener" style={{ fontSize: '13px', fontWeight: 'normal' }}>
+					(help ↗)
+				</a>
+			</h1>
 			<p className="muted">
 				Manufacturers, rep firms, clients, GCs, and designers. The same company can wear
 				multiple hats — e.g., LOGIQ SUPPLY is both manufacturer and rep firm.

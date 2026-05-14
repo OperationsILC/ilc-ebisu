@@ -60,7 +60,12 @@ export default async function BillsListPage({
 				<a href={`/projects/${project.id}`}>← {project.name}</a>
 			</p>
 
-			<h1>Bills — {project.name}</h1>
+			<h1>
+				Bills — {project.name}{' '}
+				<a href="/help/bills" target="_blank" rel="noopener" style={{ fontSize: '13px', fontWeight: 'normal' }}>
+					(help ↗)
+				</a>
+			</h1>
 
 			<p className="muted">
 				Bills arrive via DocParser webhook (OCR&apos;d from emailed PDF) or manual entry. PMs

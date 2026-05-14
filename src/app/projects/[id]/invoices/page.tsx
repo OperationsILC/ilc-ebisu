@@ -60,7 +60,12 @@ export default async function InvoicesListPage({
 				<a href={`/projects/${project.id}`}>← {project.name}</a>
 			</p>
 
-			<h1>Invoices — {project.name}</h1>
+			<h1>
+				Invoices — {project.name}{' '}
+				<a href="/help/invoices" target="_blank" rel="noopener" style={{ fontSize: '13px', fontWeight: 'normal' }}>
+					(help ↗)
+				</a>
+			</h1>
 
 			<p className="muted">
 				Product invoices are created from a Sales Order. Design-fee invoices and credit memos are
