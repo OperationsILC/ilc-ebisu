@@ -26,8 +26,8 @@ export const PAGE_MARGIN = { top: 36, bottom: 56, left: 36, right: 36 };
 // per-PO via the shipToText / ilcOfficeAddress fields on the row if needed.
 export const ILC_OFFICE_DEFAULT = {
 	name: 'ILC Studios',
-	address: '1234 Lighting Way',
-	cityStateZip: 'City, ST 00000',
+	address: '2301 Blake Street, Ste. 100',
+	cityStateZip: 'Denver, CO 80205',
 	email: 'orders@ilcstudios.com',
 	website: 'ilcstudios.com'
 };

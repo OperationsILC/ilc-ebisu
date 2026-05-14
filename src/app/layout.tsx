@@ -17,6 +17,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
 					<strong>Ebisu</strong>
 					<a href="/">Home</a>
 					<a href="/projects">Projects</a>
+					<a href="/companies">Companies</a>
 					<a href="/bills">Bills inbox</a>
 					<span className="spacer" />
 					{user ? (

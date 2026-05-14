@@ -19,6 +19,9 @@ frontend:
         - echo "RESEND_API_KEY=$RESEND_API_KEY" >> .env.production
         - echo "EMAIL_FROM=$EMAIL_FROM" >> .env.production
         - echo "DEV_EMAIL_REDIRECT=$DEV_EMAIL_REDIRECT" >> .env.production
+        # DocParser webhook auth — must be set in Amplify env vars before
+        # bills can be posted to /api/bills/inbound.
+        - echo "BILLS_INBOUND_SECRET=$BILLS_INBOUND_SECRET" >> .env.production
     build:
       commands:
         - npm run build
