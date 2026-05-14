@@ -413,9 +413,13 @@ export const rfqLines = pgTable(
 		descriptionSnapshot: text('description_snapshot'),
 
 		// Filled in when the rep quotes back. The PM manually pushes this to
-		// qap_lines.current_dn from the QAP grid when they accept the quote.
+		// qap_lines.current_dn from the RFQ page when they accept the quote.
 		quotedDn: numeric('quoted_dn'),
 		quoteReceivedAt: timestamp('quote_received_at', { withTimezone: true }),
+		// Tracks when this line's quoted_dn was promoted to qap_lines.current_dn.
+		// Null = quote not yet applied; non-null = already pushed to QAP.
+		appliedToQapAt: timestamp('applied_to_qap_at', { withTimezone: true }),
+		appliedToQapByUserId: uuid('applied_to_qap_by_user_id').references(() => users.id),
 
 		createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow()
 	},

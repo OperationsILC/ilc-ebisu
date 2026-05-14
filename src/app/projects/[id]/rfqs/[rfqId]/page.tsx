@@ -2,6 +2,7 @@ import { db } from '@/lib/db';
 import { rfqs, rfqLines, projects, companies, users } from '@/lib/db/schema';
 import { eq, and } from 'drizzle-orm';
 import { notFound } from 'next/navigation';
+import RfqDetailClient from './RfqDetailClient';
 
 export default async function RfqDetailPage({
 	params
@@ -27,7 +28,6 @@ export default async function RfqDetailPage({
 			.limit(1)
 	)[0];
 	if (!rfqRow) notFound();
-	const r = rfqRow.rfq;
 
 	const lines = await db
 		.select()
@@ -35,92 +35,36 @@ export default async function RfqDetailPage({
 		.where(eq(rfqLines.rfqId, rfqId))
 		.orderBy(rfqLines.manufacturerNameSnapshot, rfqLines.typeNameSnapshot, rfqLines.catalogNoSnapshot);
 
-	const totalQty = lines.reduce((s, l) => s + Number(l.qtySnapshot ?? 0), 0);
-	const quotedTotal = lines.reduce(
-		(s, l) => s + Number(l.quotedDn ?? 0) * Number(l.qtySnapshot ?? 0),
-		0
-	);
-	const lineCountWithQuotes = lines.filter((l) => l.quotedDn !== null).length;
+	// Serialize Dates and numerics to JSON-safe shape for the client component.
+	const safeLines = lines.map((l) => ({
+		id: l.id,
+		qapLineId: l.qapLineId,
+		qtySnapshot: l.qtySnapshot,
+		typeNameSnapshot: l.typeNameSnapshot,
+		catalogNoSnapshot: l.catalogNoSnapshot,
+		manufacturerNameSnapshot: l.manufacturerNameSnapshot,
+		descriptionSnapshot: l.descriptionSnapshot,
+		quotedDn: l.quotedDn,
+		quoteReceivedAt: l.quoteReceivedAt?.toISOString() ?? null,
+		appliedToQapAt: l.appliedToQapAt?.toISOString() ?? null
+	}));
 
+	const r = rfqRow.rfq;
 	return (
-		<>
-			<p>
-				<a href={`/projects/${project.id}/rfqs`}>← RFQs for {project.name}</a>
-			</p>
-
-			<h1>{r.rfqNo}</h1>
-			<p className="muted">
-				{r.status} · {project.name} · to <strong>{rfqRow.repFirm ?? '(no rep firm)'}</strong>
-			</p>
-
-			<table className="plain" style={{ maxWidth: '720px', marginBottom: '20px' }}>
-				<tbody>
-					<tr>
-						<th>RFQ NO</th>
-						<td>{r.rfqNo}</td>
-					</tr>
-					<tr>
-						<th>Rep firm</th>
-						<td>{rfqRow.repFirm ?? '—'}</td>
-					</tr>
-					<tr>
-						<th>Status</th>
-						<td>{r.status}</td>
-					</tr>
-					<tr>
-						<th>Notes</th>
-						<td>{r.notes ?? '—'}</td>
-					</tr>
-					<tr>
-						<th>Created</th>
-						<td>
-							{new Date(r.createdAt).toLocaleString()} by {rfqRow.creatorEmail ?? '—'}
-						</td>
-					</tr>
-					<tr>
-						<th>Sent</th>
-						<td>{r.sentAt ? new Date(r.sentAt).toLocaleString() : '—'}</td>
-					</tr>
-				</tbody>
-			</table>
-
-			<h2>Lines ({lines.length})</h2>
-			<p className="muted">
-				Total QTY: {totalQty} · Quotes received: {lineCountWithQuotes} of {lines.length}
-				{quotedTotal > 0 && <> · Quoted total: ${quotedTotal.toLocaleString()}</>}
-			</p>
-
-			<table className="plain" style={{ fontSize: '12px' }}>
-				<thead>
-					<tr>
-						<th>TYPE</th>
-						<th>CATALOG #</th>
-						<th>MANUFACTURER</th>
-						<th style={{ textAlign: 'right' }}>QTY</th>
-						<th style={{ textAlign: 'right' }}>QUOTED DN</th>
-						<th>Description</th>
-					</tr>
-				</thead>
-				<tbody>
-					{lines.map((l) => (
-						<tr key={l.id}>
-							<td>{l.typeNameSnapshot}</td>
-							<td>{l.catalogNoSnapshot}</td>
-							<td>{l.manufacturerNameSnapshot ?? '—'}</td>
-							<td style={{ textAlign: 'right' }}>{l.qtySnapshot ?? '—'}</td>
-							<td style={{ textAlign: 'right' }}>{l.quotedDn ?? '—'}</td>
-							<td className="muted" style={{ maxWidth: '320px' }}>
-								{l.descriptionSnapshot ?? ''}
-							</td>
-						</tr>
-					))}
-				</tbody>
-			</table>
-
-			<p className="muted" style={{ marginTop: '24px' }}>
-				Quote-receiving, status transitions (sent → quoted → accepted), PDF generation, and email
-				send are next steps. For Phase 2 starter, RFQs live as drafts in the system.
-			</p>
-		</>
+		<RfqDetailClient
+			projectId={project.id}
+			projectName={project.name}
+			rfq={{
+				id: r.id,
+				rfqNo: r.rfqNo,
+				status: r.status,
+				notes: r.notes,
+				sentAt: r.sentAt?.toISOString() ?? null,
+				createdAt: r.createdAt.toISOString(),
+				repFirm: rfqRow.repFirm,
+				creatorEmail: rfqRow.creatorEmail
+			}}
+			lines={safeLines}
+		/>
 	);
 }

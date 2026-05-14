@@ -1,0 +1,3 @@
+ALTER TABLE "rfq_lines" ADD COLUMN "applied_to_qap_at" timestamp with time zone;--> statement-breakpoint
+ALTER TABLE "rfq_lines" ADD COLUMN "applied_to_qap_by_user_id" uuid;--> statement-breakpoint
+ALTER TABLE "rfq_lines" ADD CONSTRAINT "rfq_lines_applied_to_qap_by_user_id_users_id_fk" FOREIGN KEY ("applied_to_qap_by_user_id") REFERENCES "public"."users"("id") ON DELETE no action ON UPDATE no action;

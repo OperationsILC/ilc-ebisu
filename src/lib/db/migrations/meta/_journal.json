@@ -15,6 +15,13 @@
       "when": 1778715836911,
       "tag": "0001_medical_prima",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1778716725501,
+      "tag": "0002_jazzy_wolf_cub",
+      "breakpoints": true
     }
   ]
 }
