@@ -51,6 +51,13 @@ type Line = {
 	unitCn: string | null;
 	marginPct: string | null;
 	repQuoteNo: string | null;
+	receivedQty: number;
+	committedQty: number;
+};
+
+type ShipmentRollup = {
+	shipmentCount: number;
+	receivedCount: number;
 };
 
 type Props = {
@@ -58,9 +65,16 @@ type Props = {
 	projectName: string;
 	po: Po;
 	lines: Line[];
+	shipmentRollup: ShipmentRollup;
 };
 
-export default function PoDetailClient({ projectId, projectName, po, lines }: Props) {
+export default function PoDetailClient({
+	projectId,
+	projectName,
+	po,
+	lines,
+	shipmentRollup
+}: Props) {
 	const [pending, startTransition] = useTransition();
 	const [flash, setFlash] = useState<string | null>(null);
 	const [error, setError] = useState<string | null>(null);
@@ -200,6 +214,17 @@ export default function PoDetailClient({ projectId, projectName, po, lines }: Pr
 				))}
 			</datalist>
 
+			<h2 style={{ marginBottom: '4px' }}>Shipments</h2>
+			<p style={{ margin: '0 0 12px 0' }}>
+				<a href={`/projects/${projectId}/pos/${po.id}/shipments`}>
+					{shipmentRollup.shipmentCount === 0
+						? 'No shipments yet — track partial deliveries here →'
+						: `${shipmentRollup.shipmentCount} shipment${
+								shipmentRollup.shipmentCount === 1 ? '' : 's'
+							} (${shipmentRollup.receivedCount} received) →`}
+				</a>
+			</p>
+
 			<h2>Totals (DN side)</h2>
 			<div
 				style={{
@@ -240,6 +265,7 @@ export default function PoDetailClient({ projectId, projectName, po, lines }: Pr
 							<th>CATALOG #</th>
 							<th>MANUFACTURER</th>
 							<th style={{ textAlign: 'right' }}>QTY</th>
+							<th style={{ textAlign: 'right' }} className="muted">RCVD</th>
 							<th>QTY TYPE</th>
 							<th style={{ textAlign: 'right' }}>UNIT DN</th>
 							<th style={{ textAlign: 'right' }}>MARGIN %</th>
@@ -264,6 +290,19 @@ export default function PoDetailClient({ projectId, projectName, po, lines }: Pr
 											pending={pending}
 											width="70px"
 										/>
+									</td>
+									<td
+										style={{ textAlign: 'right' }}
+										className="muted"
+										title={
+											l.committedQty > l.receivedQty
+												? `${l.receivedQty} received, ${l.committedQty - l.receivedQty} more on expected/in-transit shipments`
+												: undefined
+										}
+									>
+										{l.receivedQty > 0 || l.committedQty > 0
+											? `${l.receivedQty}${l.committedQty > l.receivedQty ? `+${l.committedQty - l.receivedQty}` : ''}`
+											: '—'}
 									</td>
 									<td>
 										<EditText

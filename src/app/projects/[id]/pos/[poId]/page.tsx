@@ -5,9 +5,11 @@ import {
 	orderLines,
 	projects,
 	companies,
-	users
+	users,
+	shipments,
+	shipmentLines
 } from '@/lib/db/schema';
-import { eq, and } from 'drizzle-orm';
+import { eq, and, sql } from 'drizzle-orm';
 import { notFound } from 'next/navigation';
 import PoDetailClient from './PoDetailClient';
 
@@ -48,6 +50,38 @@ export default async function PoDetailPage({
 		.where(eq(orderLines.purchaseOrderId, poId))
 		.orderBy(orderLines.manufacturerNameSnapshot, orderLines.typeNameSnapshot, orderLines.catalogNoSnapshot);
 
+	// Per-line "received qty" rollup — sum of qty_shipped from received shipments.
+	const receivedByLine = await db
+		.select({
+			orderLineId: shipmentLines.orderLineId,
+			received: sql<string>`coalesce(sum(${shipmentLines.qtyShipped}), 0)`
+		})
+		.from(shipmentLines)
+		.innerJoin(shipments, eq(shipmentLines.shipmentId, shipments.id))
+		.where(and(eq(shipments.purchaseOrderId, poId), eq(shipments.status, 'received')))
+		.groupBy(shipmentLines.orderLineId);
+	const receivedByLineMap = new Map(
+		receivedByLine.map((r) => [r.orderLineId, Number(r.received)])
+	);
+
+	// Per-line "committed qty" — sum across non-cancelled shipments (including
+	// expected / in_transit / partial / received) so PMs can see what's
+	// allocated even if not yet delivered.
+	const committedByLine = await db
+		.select({
+			orderLineId: shipmentLines.orderLineId,
+			committed: sql<string>`coalesce(sum(${shipmentLines.qtyShipped}), 0)`
+		})
+		.from(shipmentLines)
+		.innerJoin(shipments, eq(shipmentLines.shipmentId, shipments.id))
+		.where(
+			and(eq(shipments.purchaseOrderId, poId), sql`${shipments.status} != 'cancelled'`)
+		)
+		.groupBy(shipmentLines.orderLineId);
+	const committedByLineMap = new Map(
+		committedByLine.map((r) => [r.orderLineId, Number(r.committed)])
+	);
+
 	const safeLines = lines.map((l) => ({
 		id: l.id,
 		rowVersion: Number(l.rowVersion),
@@ -60,8 +94,19 @@ export default async function PoDetailPage({
 		unitDn: l.unitDn,
 		unitCn: l.unitCn,
 		marginPct: l.marginPct,
-		repQuoteNo: l.repQuoteNo
+		repQuoteNo: l.repQuoteNo,
+		receivedQty: receivedByLineMap.get(l.id) ?? 0,
+		committedQty: committedByLineMap.get(l.id) ?? 0
 	}));
+
+	// PO-level shipment rollup
+	const [shipmentRollup] = await db
+		.select({
+			shipmentCount: sql<number>`count(*)::int`,
+			receivedCount: sql<number>`count(*) filter (where ${shipments.status} = 'received')::int`
+		})
+		.from(shipments)
+		.where(eq(shipments.purchaseOrderId, poId));
 
 	return (
 		<PoDetailClient
@@ -95,6 +140,10 @@ export default async function PoDetailPage({
 				soId: poRow.soId
 			}}
 			lines={safeLines}
+			shipmentRollup={{
+				shipmentCount: Number(shipmentRollup?.shipmentCount ?? 0),
+				receivedCount: Number(shipmentRollup?.receivedCount ?? 0)
+			}}
 		/>
 	);
 }

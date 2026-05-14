@@ -6,7 +6,8 @@ import {
 	companies,
 	rfqs,
 	salesOrders,
-	purchaseOrders
+	purchaseOrders,
+	shipments
 } from '@/lib/db/schema';
 import { eq, count, desc, sql } from 'drizzle-orm';
 import { notFound } from 'next/navigation';
@@ -58,6 +59,11 @@ export default async function ProjectDetailPage({
 		.select({ poCount: count() })
 		.from(purchaseOrders)
 		.where(eq(purchaseOrders.projectId, id));
+
+	const [{ shipmentCount }] = await db
+		.select({ shipmentCount: count() })
+		.from(shipments)
+		.where(eq(shipments.projectId, id));
 
 	// Top 5 manufacturers by line count
 	const topMfrs = await db
@@ -111,6 +117,9 @@ export default async function ProjectDetailPage({
 				</a>
 				<a href={`/projects/${p.id}/pos`}>
 					<button>Purchase Orders ({poCount})</button>
+				</a>
+				<a href={`/projects/${p.id}/shipments`}>
+					<button>Shipments ({shipmentCount})</button>
 				</a>
 			</div>
 

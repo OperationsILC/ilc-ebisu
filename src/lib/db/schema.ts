@@ -588,6 +588,86 @@ export const orderLines = pgTable(
 );
 
 // ---------------------------------------------------------------------------
+// Shipments — partial-line tracking
+// ---------------------------------------------------------------------------
+// A shipment is one physical delivery from one rep firm for one PO. A PO can
+// have many shipments because manufacturers commonly split deliveries (50 now,
+// 50 in six weeks). Each shipment is composed of shipment_lines, one per PO
+// line that's actually on this delivery, with a qty_shipped that can be less
+// than the line's qty (partial). The "received qty per order_line" rollup is
+// computed live from SUM(shipment_lines.qty_shipped) where shipments.status
+// is 'received' — never denormalized to avoid sync bugs.
+
+export const shipments = pgTable('shipments', {
+	id: uuid('id').defaultRandom().primaryKey(),
+	projectId: uuid('project_id')
+		.notNull()
+		.references(() => projects.id, { onDelete: 'cascade' }),
+	purchaseOrderId: uuid('purchase_order_id')
+		.notNull()
+		.references(() => purchaseOrders.id, { onDelete: 'cascade' }),
+
+	shipmentNo: text('shipment_no').notNull().unique(),
+	// e.g. "SHP00001" — global sequence.
+
+	status: text('status').notNull().default('expected'),
+	// expected | in_transit | received | partial | cancelled
+	// 'partial' is for an arrived-but-short shipment that the PM has logged
+	// without marking fully received (e.g. damaged box still being investigated).
+
+	carrier: text('carrier'),
+	trackingNumber: text('tracking_number'),
+	expectedDate: timestamp('expected_date', { withTimezone: true }),
+	shippedDate: timestamp('shipped_date', { withTimezone: true }),
+	receivedDate: timestamp('received_date', { withTimezone: true }),
+	// Auto-stamped when status flips to 'received' for the first time.
+
+	receivedAtLocation: text('received_at_location'),
+	// Free text — 'warehouse', 'jobsite', '123 Main St', etc. PMs use this to
+	// know where the boxes actually are.
+
+	notes: text('notes'),
+	internalNotes: text('internal_notes'),
+
+	rowVersion: bigint('row_version', { mode: 'number' }).notNull().default(1),
+	createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+	updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+	createdByUserId: uuid('created_by_user_id').references(() => users.id),
+	receivedByUserId: uuid('received_by_user_id').references(() => users.id)
+});
+
+export const shipmentLines = pgTable(
+	'shipment_lines',
+	{
+		id: uuid('id').defaultRandom().primaryKey(),
+		shipmentId: uuid('shipment_id')
+			.notNull()
+			.references(() => shipments.id, { onDelete: 'cascade' }),
+		orderLineId: uuid('order_line_id')
+			.notNull()
+			.references(() => orderLines.id, { onDelete: 'cascade' }),
+
+		qtyShipped: numeric('qty_shipped').notNull(),
+		// Quantity on THIS shipment. Sum across all received shipments for an
+		// order_line = total received. Can be less than the order_line's qty
+		// (partial shipment) and can in theory exceed it (over-ship — manufacturer
+		// sent extras). The UI warns on over-ship but doesn't block.
+
+		notes: text('notes'),
+		// Per-line notes — "missing 2 lenses", "wrong finish on 5", etc.
+
+		createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow()
+	},
+	(t) => [
+		index('shipment_lines_shipment_idx').on(t.shipmentId),
+		index('shipment_lines_order_line_idx').on(t.orderLineId),
+		unique('shipment_lines_shipment_order_line_uq').on(t.shipmentId, t.orderLineId)
+		// A given order_line can appear AT MOST once per shipment. If you ship
+		// the line in two waves, that's two shipments, not two rows on one.
+	]
+);
+
+// ---------------------------------------------------------------------------
 // Cell-level audit log
 // ---------------------------------------------------------------------------
 // One row per cell change, not per row change. Keeps the table size proportional
@@ -631,6 +711,10 @@ export type PurchaseOrder = typeof purchaseOrders.$inferSelect;
 export type NewPurchaseOrder = typeof purchaseOrders.$inferInsert;
 export type OrderLine = typeof orderLines.$inferSelect;
 export type NewOrderLine = typeof orderLines.$inferInsert;
+export type Shipment = typeof shipments.$inferSelect;
+export type NewShipment = typeof shipments.$inferInsert;
+export type ShipmentLine = typeof shipmentLines.$inferSelect;
+export type NewShipmentLine = typeof shipmentLines.$inferInsert;
 export type Company = typeof companies.$inferSelect;
 export type NewCompany = typeof companies.$inferInsert;
 export type QapLine = typeof qapLines.$inferSelect;
