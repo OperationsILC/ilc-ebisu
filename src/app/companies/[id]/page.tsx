@@ -9,6 +9,7 @@ import { asc, eq, sql, ne } from 'drizzle-orm';
 import { notFound } from 'next/navigation';
 import CompanyForm from '../CompanyForm';
 import ManufacturerRepsClient from './ManufacturerRepsClient';
+import QboLinkPanel from './QboLinkPanel';
 
 export default async function EditCompanyPage({
 	params
@@ -108,6 +109,13 @@ export default async function EditCompanyPage({
 				}}
 				currentRoles={currentRoles}
 				parentOptions={parents}
+			/>
+
+			<QboLinkPanel
+				companyId={id}
+				companyName={company.name}
+				currentCustomerId={company.qboCustomerId}
+				currentVendorId={company.qboVendorId}
 			/>
 
 			{isManufacturer && (

@@ -12,6 +12,7 @@ import { and, eq, inArray, ne } from 'drizzle-orm';
 import { revalidatePath } from 'next/cache';
 import { redirect } from 'next/navigation';
 import { z } from 'zod';
+import { qboQuery, QboNotConnectedError } from '@/lib/qbo/client';
 
 const ROLE_VALUES = ['manufacturer', 'rep_firm', 'client', 'gc', 'designer'] as const;
 type CompanyRoleValue = (typeof ROLE_VALUES)[number];
@@ -233,4 +234,85 @@ function blankToNull(v: string | undefined): string | null {
 	if (v === undefined) return null;
 	const t = v.trim();
 	return t === '' ? null : t;
+}
+
+// ---------------------------------------------------------------------------
+// QBO Customer / Vendor lookup + link
+// ---------------------------------------------------------------------------
+
+export type QboPartySearchResult = {
+	matches: { id: string; displayName: string; companyName?: string; primaryEmail?: string }[];
+	error?: string;
+};
+
+/**
+ * Search QBO for Customer or Vendor records by name. Used by the Companies
+ * edit page's "Find in QBO" picker. Match is case-insensitive substring
+ * (QBO Query Language uses LIKE with %).
+ */
+export async function searchQboParty(
+	kind: 'customer' | 'vendor',
+	nameLike: string
+): Promise<QboPartySearchResult> {
+	await requireUser();
+	const escaped = nameLike.replace(/'/g, "\\'");
+	const entity = kind === 'customer' ? 'Customer' : 'Vendor';
+
+	try {
+		const res = await qboQuery<{
+			QueryResponse?: {
+				Customer?: Array<{
+					Id: string;
+					DisplayName: string;
+					CompanyName?: string;
+					PrimaryEmailAddr?: { Address?: string };
+				}>;
+				Vendor?: Array<{
+					Id: string;
+					DisplayName: string;
+					CompanyName?: string;
+					PrimaryEmailAddr?: { Address?: string };
+				}>;
+			};
+		}>(
+			`SELECT Id, DisplayName, CompanyName, PrimaryEmailAddr FROM ${entity} WHERE DisplayName LIKE '%${escaped}%' MAXRESULTS 20`
+		);
+		const list =
+			kind === 'customer' ? res.QueryResponse?.Customer : res.QueryResponse?.Vendor;
+		return {
+			matches: (list ?? []).map((p) => ({
+				id: p.Id,
+				displayName: p.DisplayName,
+				companyName: p.CompanyName,
+				primaryEmail: p.PrimaryEmailAddr?.Address
+			}))
+		};
+	} catch (err) {
+		if (err instanceof QboNotConnectedError) {
+			return { matches: [], error: 'Not connected to QBO. Connect at /qbo first.' };
+		}
+		return { matches: [], error: err instanceof Error ? err.message : String(err) };
+	}
+}
+
+/**
+ * Save a QBO Customer or Vendor ID onto an Ebisu company. Either link is
+ * nullable (passing empty string clears it).
+ */
+export async function setCompanyQboLink(
+	companyId: string,
+	kind: 'customer' | 'vendor',
+	qboId: string
+): Promise<{ ok?: boolean; error?: string }> {
+	await requireUser();
+	const trimmed = qboId.trim();
+	const col = kind === 'customer' ? 'qboCustomerId' : 'qboVendorId';
+	const updates: Record<string, unknown> = {
+		[col]: trimmed === '' ? null : trimmed,
+		updatedAt: new Date()
+	};
+	await db.update(companies).set(updates).where(eq(companies.id, companyId));
+	revalidatePath(`/companies/${companyId}`);
+	revalidatePath('/companies');
+	return { ok: true };
 }

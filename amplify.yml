@@ -22,6 +22,18 @@ frontend:
         # DocParser webhook auth — must be set in Amplify env vars before
         # bills can be posted to /api/bills/inbound.
         - echo "BILLS_INBOUND_SECRET=$BILLS_INBOUND_SECRET" >> .env.production
+        # QBO integration. Sandbox = Intuit Developer "Development" keys,
+        # only talks to sandbox companies. Production keys (separate vars,
+        # added later when Intuit approves the app) talk to real companies.
+        # QBO_TOKEN_ENC_KEY is a 32-byte hex string used to AES-encrypt
+        # OAuth tokens at rest in the qbo_connections table.
+        - echo "QBO_CLIENT_ID_SANDBOX=$QBO_CLIENT_ID_SANDBOX" >> .env.production
+        - echo "QBO_CLIENT_SECRET_SANDBOX=$QBO_CLIENT_SECRET_SANDBOX" >> .env.production
+        - echo "QBO_CLIENT_ID_PRODUCTION=$QBO_CLIENT_ID_PRODUCTION" >> .env.production
+        - echo "QBO_CLIENT_SECRET_PRODUCTION=$QBO_CLIENT_SECRET_PRODUCTION" >> .env.production
+        - echo "QBO_TOKEN_ENC_KEY=$QBO_TOKEN_ENC_KEY" >> .env.production
+        - echo "QBO_ENVIRONMENT=$QBO_ENVIRONMENT" >> .env.production
+        - echo "QBO_DRY_RUN=$QBO_DRY_RUN" >> .env.production
     build:
       commands:
         - npm run build

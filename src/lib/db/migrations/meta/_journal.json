@@ -71,6 +71,13 @@
       "when": 1778807427737,
       "tag": "0009_wooden_harpoon",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1778855044745,
+      "tag": "0010_free_forgotten_one",
+      "breakpoints": true
     }
   ]
 }

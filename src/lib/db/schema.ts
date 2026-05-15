@@ -292,6 +292,13 @@ export const products = pgTable(
 		fixtureOrControl: text('fixture_or_control'),
 		notes: text('notes'),
 		status: text('status'),
+		// QBO Item link. Populated on first push: get-or-create against QBO's
+		// Item list, then store the ID for idempotent subsequent pushes.
+		qboItemId: text('qbo_item_id'),
+		qboStatus: text('qbo_status').notNull().default('not_pushed'),
+		// not_pushed | queued | pushed | failed
+		qboPushedAt: timestamp('qbo_pushed_at', { withTimezone: true }),
+		qboLastError: text('qbo_last_error'),
 		createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
 		updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow()
 	},
@@ -1124,6 +1131,42 @@ export const clientCredits = pgTable('client_credits', {
 });
 
 // ---------------------------------------------------------------------------
+// QBO connections — OAuth state per environment
+// ---------------------------------------------------------------------------
+// One active row per environment (sandbox / production). Tokens are stored
+// AES-256-GCM encrypted using QBO_TOKEN_ENC_KEY. On disconnect we keep the
+// row for audit purposes with disconnected_at set; active = disconnected_at
+// IS NULL. The default income / cogs account references are set during
+// initial connection so subsequent Item creates have the required field.
+
+export const qboConnections = pgTable('qbo_connections', {
+	id: uuid('id').defaultRandom().primaryKey(),
+	environment: text('environment').notNull(),
+	// sandbox | production
+	realmId: text('realm_id').notNull(),
+	// QBO company ID the tokens authorize against.
+
+	accessTokenCiphertext: text('access_token_ciphertext').notNull(),
+	refreshTokenCiphertext: text('refresh_token_ciphertext').notNull(),
+	expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+	// access token expiry. Refresh tokens last 100 days and rotate on each
+	// refresh — we re-store the new pair every time we refresh.
+
+	defaultIncomeAccountId: text('default_income_account_id'),
+	defaultIncomeAccountName: text('default_income_account_name'),
+	defaultCogsAccountId: text('default_cogs_account_id'),
+	defaultCogsAccountName: text('default_cogs_account_name'),
+	// Required for QBO Item creation. PM picks once at connection time.
+
+	connectedAt: timestamp('connected_at', { withTimezone: true }).notNull().defaultNow(),
+	connectedByUserId: uuid('connected_by_user_id').references(() => users.id),
+	disconnectedAt: timestamp('disconnected_at', { withTimezone: true }),
+
+	createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+	updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow()
+});
+
+// ---------------------------------------------------------------------------
 // Cell-level audit log
 // ---------------------------------------------------------------------------
 // One row per cell change, not per row change. Keeps the table size proportional
@@ -1189,6 +1232,8 @@ export type Budget = typeof budgets.$inferSelect;
 export type NewBudget = typeof budgets.$inferInsert;
 export type BudgetLine = typeof budgetLines.$inferSelect;
 export type NewBudgetLine = typeof budgetLines.$inferInsert;
+export type QboConnection = typeof qboConnections.$inferSelect;
+export type NewQboConnection = typeof qboConnections.$inferInsert;
 export type Company = typeof companies.$inferSelect;
 export type NewCompany = typeof companies.$inferInsert;
 export type QapLine = typeof qapLines.$inferSelect;
