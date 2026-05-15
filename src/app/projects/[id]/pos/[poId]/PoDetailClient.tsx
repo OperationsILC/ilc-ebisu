@@ -235,6 +235,13 @@ export default function PoDetailClient({
 				</a>
 			</p>
 
+			<h2 style={{ marginBottom: '4px' }}>Change Orders</h2>
+			<p style={{ margin: '0 0 12px 0' }}>
+				<a href={`/projects/${projectId}/pos/${po.id}/change-orders`}>
+					Track versioned modifications to this PO →
+				</a>
+			</p>
+
 			<h2>Totals (DN side)</h2>
 			<div
 				style={{

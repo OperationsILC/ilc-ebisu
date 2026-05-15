@@ -7,6 +7,7 @@ const TOPICS = [
 	{ slug: 'rfqs', label: 'RFQs — requesting quotes' },
 	{ slug: 'sales-orders', label: 'Sales Orders' },
 	{ slug: 'purchase-orders', label: 'Purchase Orders' },
+	{ slug: 'change-orders', label: 'Change Orders' },
 	{ slug: 'shipments', label: 'Shipments & deliveries' },
 	{ slug: 'invoices', label: 'Invoices (to clients)' },
 	{ slug: 'bills', label: 'Bills (from vendors)' },

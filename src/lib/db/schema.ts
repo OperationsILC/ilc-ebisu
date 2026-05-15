@@ -726,6 +726,121 @@ export const shipmentLines = pgTable(
 );
 
 // ---------------------------------------------------------------------------
+// Change Orders — versioned modifications to a sent PO
+// ---------------------------------------------------------------------------
+// A CO captures a delta against a PO that's already been sent. Each CO bumps
+// the PO's version_no when applied. Common cases: add a missed line, remove
+// an over-ordered line, modify qty/price/spec.
+//
+// Only one open CO per PO at a time (enforced in the action, not the schema).
+// COs preserve their own before/after snapshot per line so the historical
+// record is immutable even if the underlying order_lines later mutate again.
+
+export const changeOrders = pgTable('change_orders', {
+	id: uuid('id').defaultRandom().primaryKey(),
+	projectId: uuid('project_id')
+		.notNull()
+		.references(() => projects.id, { onDelete: 'cascade' }),
+	purchaseOrderId: uuid('purchase_order_id')
+		.notNull()
+		.references(() => purchaseOrders.id, { onDelete: 'cascade' }),
+
+	coNo: text('co_no').notNull().unique(),
+	// e.g. "CO00123"
+
+	versionNoBefore: integer('version_no_before').notNull(),
+	// The PO version this CO is amending. Snapshot from purchase_orders.version_no
+	// at CO creation.
+	versionNoAfter: integer('version_no_after'),
+	// What the PO version becomes after the CO applies. Filled in on apply.
+
+	status: text('status').notNull().default('draft'),
+	// draft | sent | acknowledged | rejected | applied | cancelled
+
+	description: text('description'),
+	// PM's explanation — why does this CO exist?
+	reason: text('reason'),
+	// Optional category — add_lines | remove_lines | qty_change | price_change
+	// | spec_change | other. Free text for now; could enum later.
+	customEmailMessage: text('custom_email_message'),
+
+	netAmountChange: numeric('net_amount_change').default('0'),
+	// $ delta vs as-sent PO total. Computed at line save.
+
+	sentAt: timestamp('sent_at', { withTimezone: true }),
+	acknowledgedAt: timestamp('acknowledged_at', { withTimezone: true }),
+	appliedAt: timestamp('applied_at', { withTimezone: true }),
+	rejectedAt: timestamp('rejected_at', { withTimezone: true }),
+	rejectedReason: text('rejected_reason'),
+
+	appliedByUserId: uuid('applied_by_user_id').references(() => users.id),
+
+	// QBO push state — when a CO needs to update the QBO PO record.
+	// Not all COs push (some are pre-acknowledgement spec fixes).
+	qboId: text('qbo_id'),
+	qboStatus: text('qbo_status').notNull().default('not_pushed'),
+	qboPushedAt: timestamp('qbo_pushed_at', { withTimezone: true }),
+	qboLastError: text('qbo_last_error'),
+
+	rowVersion: bigint('row_version', { mode: 'number' }).notNull().default(1),
+	createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+	updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+	createdByUserId: uuid('created_by_user_id').references(() => users.id)
+});
+
+export const changeOrderLines = pgTable(
+	'change_order_lines',
+	{
+		id: uuid('id').defaultRandom().primaryKey(),
+		changeOrderId: uuid('change_order_id')
+			.notNull()
+			.references(() => changeOrders.id, { onDelete: 'cascade' }),
+		orderLineId: uuid('order_line_id').references(() => orderLines.id, {
+			onDelete: 'set null'
+		}),
+		// For operation='add', this is NULL until apply (then it gets the new line's id).
+		// For 'remove' and 'modify', it's the line being changed.
+
+		operation: text('operation').notNull(),
+		// add | remove | modify
+
+		// Snapshot of the line BEFORE this CO. For operation='add', all "_before"
+		// fields are NULL.
+		typeBefore: text('type_before'),
+		catalogNoBefore: text('catalog_no_before'),
+		manufacturerBefore: text('manufacturer_before'),
+		descriptionBefore: text('description_before'),
+		qtyBefore: numeric('qty_before'),
+		qtyTypeBefore: text('qty_type_before'),
+		unitDnBefore: numeric('unit_dn_before'),
+
+		// Snapshot of the line AFTER this CO. For operation='remove', all "_after"
+		// fields are NULL.
+		typeAfter: text('type_after'),
+		catalogNoAfter: text('catalog_no_after'),
+		manufacturerAfter: text('manufacturer_after'),
+		descriptionAfter: text('description_after'),
+		qtyAfter: numeric('qty_after'),
+		qtyTypeAfter: text('qty_type_after'),
+		unitDnAfter: numeric('unit_dn_after'),
+
+		lineTotalDelta: numeric('line_total_delta'),
+		// $ delta this line contributes to the CO's net_amount_change.
+		// Computed at save: (qty_after * unit_dn_after) - (qty_before * unit_dn_before),
+		// with NULLs treated as 0 for adds/removes.
+
+		reasonText: text('reason_text'),
+		// Per-line explanation (e.g. "manufacturer raised price 8% on 2026-04").
+
+		createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow()
+	},
+	(t) => [
+		index('change_order_lines_co_idx').on(t.changeOrderId),
+		index('change_order_lines_order_line_idx').on(t.orderLineId)
+	]
+);
+
+// ---------------------------------------------------------------------------
 // Receivable invoices — what ILC bills the client
 // ---------------------------------------------------------------------------
 // Invoices come into existence when the PM clicks "+ New invoice" on an SO
@@ -1042,6 +1157,10 @@ export type BillLine = typeof billLines.$inferSelect;
 export type NewBillLine = typeof billLines.$inferInsert;
 export type ClientCredit = typeof clientCredits.$inferSelect;
 export type NewClientCredit = typeof clientCredits.$inferInsert;
+export type ChangeOrder = typeof changeOrders.$inferSelect;
+export type NewChangeOrder = typeof changeOrders.$inferInsert;
+export type ChangeOrderLine = typeof changeOrderLines.$inferSelect;
+export type NewChangeOrderLine = typeof changeOrderLines.$inferInsert;
 export type Company = typeof companies.$inferSelect;
 export type NewCompany = typeof companies.$inferInsert;
 export type QapLine = typeof qapLines.$inferSelect;

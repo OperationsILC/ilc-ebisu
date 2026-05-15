@@ -57,6 +57,13 @@
       "when": 1778800134041,
       "tag": "0007_loving_avengers",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1778806690768,
+      "tag": "0008_white_texas_twister",
+      "breakpoints": true
     }
   ]
 }
