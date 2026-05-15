@@ -13,6 +13,7 @@ const TOPICS = [
 	{ slug: 'invoices', label: 'Invoices (to clients)' },
 	{ slug: 'bills', label: 'Bills (from vendors)' },
 	{ slug: 'companies', label: 'Companies — clients, vendors, reps' },
+	{ slug: 'qbo', label: 'QBO integration' },
 	{ slug: 'glossary', label: 'Glossary' }
 ];
 
