@@ -7,9 +7,11 @@ import {
 	addQapLinesToSo,
 	saveOrderLineEdits,
 	deleteOrderLine,
-	createPosFromSo
+	createPosFromSo,
+	sendSoEmail
 } from './actions';
 import { createProductInvoice } from '../../invoices/actions';
+import { SendPanel } from '@/app/components/SendPanel';
 
 const usd = new Intl.NumberFormat('en-US', {
 	style: 'currency',
@@ -321,6 +323,25 @@ export default function SoDetailClient({
 
 			{flash && <p className="flash success">{flash}</p>}
 			{error && <p className="flash error">{error}</p>}
+
+			<SendPanel
+				docKindLabel="SO"
+				docNo={so.soNo}
+				defaultTo=""
+				onSend={async (to) => {
+					const r = await sendSoEmail(projectId, so.id, to);
+					if (r.error) errorThen(r.error);
+					else {
+						let msg = `Sent to ${r.sentTo?.join(', ') ?? ''}.`;
+						if (r.redirectedTo)
+							msg += ` (DEV_EMAIL_REDIRECT diverted to ${r.redirectedTo.join(', ')})`;
+						flashThen(msg);
+						setTimeout(() => window.location.reload(), 600);
+					}
+				}}
+				pending={pending}
+				startTransition={startTransition}
+			/>
 
 			<datalist id="qty-type-suggestions">
 				{QTY_TYPE_SUGGESTIONS.map((s) => (

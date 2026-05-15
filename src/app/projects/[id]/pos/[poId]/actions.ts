@@ -1,11 +1,27 @@
 'use server';
 
 import { db } from '@/lib/db';
-import { purchaseOrders, orderLines } from '@/lib/db/schema';
+import {
+	purchaseOrders,
+	orderLines,
+	projects,
+	salesOrders,
+	companies,
+	users
+} from '@/lib/db/schema';
 import { requireUser } from '@/lib/dal';
 import { and, eq, sql } from 'drizzle-orm';
 import { revalidatePath } from 'next/cache';
 import { z } from 'zod';
+import { sendEmail } from '@/lib/email';
+import {
+	renderDocEmailHtml,
+	renderDocEmailText,
+	parseEmails,
+	type DocEmailLine
+} from '@/lib/doc-email';
+import { renderPoPdf } from '@/lib/pdf/render';
+import { type PoPdfData } from '@/lib/pdf/po';
 
 // ---------------------------------------------------------------------------
 // PO header edits
@@ -199,3 +215,208 @@ export async function savePoLineEdits(
 
 	return { accepted, rejected };
 }
+
+// ---------------------------------------------------------------------------
+// Send PO via email (PDF attached)
+// ---------------------------------------------------------------------------
+
+export type SendPoResult = {
+	ok?: boolean;
+	error?: string;
+	sentTo?: string[];
+	redirectedTo?: string[];
+};
+
+export async function sendPoEmail(
+	projectId: string,
+	poId: string,
+	recipientsRaw: string
+): Promise<SendPoResult> {
+	const me = await requireUser();
+	const recipients = parseEmails(recipientsRaw);
+	if (recipients.length === 0)
+		return { error: 'At least one valid email recipient required.' };
+
+	const project = (
+		await db.select().from(projects).where(eq(projects.id, projectId)).limit(1)
+	)[0];
+	if (!project) return { error: 'Project not found' };
+
+	const poRow = (
+		await db
+			.select({
+				po: purchaseOrders,
+				repFirm: companies.name,
+				repFirmOrderEmails: companies.orderEmails,
+				soNo: salesOrders.soNo,
+				creator: users.email,
+				creatorName: users.name
+			})
+			.from(purchaseOrders)
+			.leftJoin(companies, eq(purchaseOrders.repFirmCompanyId, companies.id))
+			.leftJoin(salesOrders, eq(purchaseOrders.salesOrderId, salesOrders.id))
+			.leftJoin(users, eq(purchaseOrders.createdByUserId, users.id))
+			.where(and(eq(purchaseOrders.id, poId), eq(purchaseOrders.projectId, projectId)))
+			.limit(1)
+	)[0];
+	if (!poRow) return { error: 'PO not found' };
+	const po = poRow.po;
+
+	const lines = await db
+		.select()
+		.from(orderLines)
+		.where(eq(orderLines.purchaseOrderId, poId))
+		.orderBy(
+			orderLines.manufacturerNameSnapshot,
+			orderLines.typeNameSnapshot,
+			orderLines.catalogNoSnapshot
+		);
+
+	if (lines.length === 0) return { error: 'PO has no lines to send.' };
+
+	const usd = new Intl.NumberFormat('en-US', {
+		style: 'currency',
+		currency: 'USD',
+		minimumFractionDigits: 2,
+		maximumFractionDigits: 2
+	});
+
+	const emailLines: DocEmailLine[] = lines.map((l) => ({
+		c1: l.typeNameSnapshot,
+		c2: l.catalogNoSnapshot,
+		c3: l.manufacturerNameSnapshot,
+		c4: l.descriptionSnapshot,
+		c5: l.qty ? Number(l.qty).toLocaleString() : null,
+		c6: l.unitDn ? usd.format(Number(l.unitDn)) : null
+	}));
+
+	let subtotal = 0;
+	for (const l of lines) subtotal += Number(l.qty ?? 0) * Number(l.unitDn ?? 0);
+	const addedFreight = Number(po.addedFreight ?? 0);
+	const grandTotal = subtotal + addedFreight;
+
+	const appUrl = process.env.AUTH_URL ?? '';
+	const docUrl = appUrl ? `${appUrl}/projects/${projectId}/pos/${poId}` : '';
+
+	const pmName = poRow.creatorName ?? me.name ?? null;
+	const pmEmail = poRow.creator ?? me.email;
+
+	const html = renderDocEmailHtml({
+		docKindLabel: 'Purchase Order',
+		docNo: po.poNo,
+		projectName: project.name,
+		recipientName: poRow.repFirm,
+		pmName,
+		pmEmail,
+		customMessage: po.customEmailMessage,
+		columns: ['Type', 'Catalog #', 'Manufacturer', 'Description', 'Qty', 'Unit DN'],
+		lines: emailLines,
+		totalsLines: [
+			{ label: 'Subtotal', value: usd.format(subtotal) },
+			...(addedFreight > 0
+				? [{ label: 'Added freight', value: usd.format(addedFreight) }]
+				: [])
+		],
+		grandLabel: 'PO Total',
+		grandValue: usd.format(grandTotal),
+		appUrl,
+		docUrl,
+		closing: 'Please confirm receipt and expected ship dates.'
+	});
+	const text = renderDocEmailText({
+		docKindLabel: 'Purchase Order',
+		docNo: po.poNo,
+		projectName: project.name,
+		recipientName: poRow.repFirm,
+		pmName,
+		pmEmail,
+		customMessage: po.customEmailMessage,
+		columns: ['Type', 'Catalog #', 'Manufacturer', 'Description', 'Qty', 'Unit DN'],
+		lines: emailLines,
+		totalsLines: [
+			{ label: 'Subtotal', value: usd.format(subtotal) },
+			...(addedFreight > 0
+				? [{ label: 'Added freight', value: usd.format(addedFreight) }]
+				: [])
+		],
+		grandLabel: 'PO Total',
+		grandValue: usd.format(grandTotal),
+		appUrl,
+		docUrl,
+		closing: 'Please confirm receipt and expected ship dates.'
+	});
+
+	// Render PDF for attachment
+	const deliveryAddress = [
+		project.deliveryStreet,
+		[project.deliveryCity, project.deliveryState, project.deliveryZip].filter(Boolean).join(' ')
+	]
+		.filter((s) => s && s.trim() !== '')
+		.join('\n');
+	const pdfData: PoPdfData = {
+		poNo: po.poNo,
+		status: po.status,
+		versionNo: po.versionNo,
+		orderedDate: po.orderedDate?.toISOString() ?? null,
+		sentAt: new Date().toISOString(),
+		createdAt: po.createdAt.toISOString(),
+		description: po.description,
+		notes: po.notes,
+		customEmailMessage: po.customEmailMessage,
+		addedFreight: po.addedFreight,
+		repQuoteNo: po.repQuoteNo,
+		trackingNumber: po.trackingNumber,
+		shipToText: po.shipToText,
+		ilcOfficeAddress: po.ilcOfficeAddress,
+		sendFromEmail: po.sendFromEmail,
+		sendToEmail: po.sendToEmail,
+		projectName: project.name,
+		soNo: poRow.soNo,
+		repFirm: poRow.repFirm,
+		repFirmOrderEmails: poRow.repFirmOrderEmails,
+		deliveryAddress: deliveryAddress || null,
+		lines: lines.map((l) => ({
+			type: l.typeNameSnapshot,
+			catalogNo: l.catalogNoSnapshot,
+			manufacturer: l.manufacturerNameSnapshot,
+			description: l.descriptionSnapshot,
+			qty: l.qty,
+			qtyType: l.qtyType,
+			unitDn: l.unitDn,
+			repQuoteNo: l.repQuoteNo
+		}))
+	};
+	const pdfBuffer = await renderPoPdf(pdfData);
+
+	const result = await sendEmail({
+		to: recipients,
+		replyTo: po.sendFromEmail ?? pmEmail,
+		subject: `Purchase Order ${po.poNo} — ${project.name}`,
+		html,
+		text,
+		attachments: [
+			{
+				filename: `${po.poNo}.pdf`,
+				content: pdfBuffer
+			}
+		]
+	});
+
+	if (!result.ok) return { error: result.error ?? 'Email send failed' };
+
+	// Auto-stamp sentAt + flip status to 'sent' if still draft
+	await db
+		.update(purchaseOrders)
+		.set({
+			status: po.status === 'draft' ? 'sent' : po.status,
+			sentAt: po.sentAt ?? new Date(),
+			updatedAt: new Date()
+		})
+		.where(eq(purchaseOrders.id, poId));
+
+	revalidatePath(`/projects/${projectId}/pos/${poId}`);
+	revalidatePath(`/projects/${projectId}/pos`);
+
+	return { ok: true, sentTo: recipients, redirectedTo: result.redirectedTo };
+}
+

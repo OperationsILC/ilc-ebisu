@@ -11,13 +11,24 @@ import {
 	companies,
 	companyRoles,
 	types,
-	manufacturerRep
+	manufacturerRep,
+	users
 } from '@/lib/db/schema';
 import { requireUser } from '@/lib/dal';
 import { and, eq, count, inArray, sql, isNull } from 'drizzle-orm';
 import { revalidatePath } from 'next/cache';
 import { z } from 'zod';
 import { redirect } from 'next/navigation';
+import { alias } from 'drizzle-orm/pg-core';
+import { sendEmail } from '@/lib/email';
+import {
+	renderDocEmailHtml,
+	renderDocEmailText,
+	parseEmails,
+	type DocEmailLine
+} from '@/lib/doc-email';
+import { renderSoPdf } from '@/lib/pdf/render';
+import { type SoPdfData } from '@/lib/pdf/so';
 
 // ---------------------------------------------------------------------------
 // SO header edits
@@ -401,4 +412,230 @@ export async function createPosFromSo(
 	revalidatePath(`/projects/${projectId}/sos/${soId}`);
 	revalidatePath(`/projects/${projectId}/pos`);
 	return { createdPos };
+}
+
+// ---------------------------------------------------------------------------
+// Send SO via email (PDF attached)
+// ---------------------------------------------------------------------------
+
+const clientCoSO = alias(companies, 'client_co_so');
+const gcCoSO = alias(companies, 'gc_co_so');
+const procurementMgrSO = alias(users, 'procurement_mgr_so');
+const projectMgrSO = alias(users, 'project_mgr_so');
+
+export type SendSoResult = {
+	ok?: boolean;
+	error?: string;
+	sentTo?: string[];
+	redirectedTo?: string[];
+};
+
+export async function sendSoEmail(
+	projectId: string,
+	soId: string,
+	recipientsRaw: string
+): Promise<SendSoResult> {
+	const me = await requireUser();
+	const recipients = parseEmails(recipientsRaw);
+	if (recipients.length === 0)
+		return { error: 'At least one valid email recipient required.' };
+
+	const project = (
+		await db.select().from(projects).where(eq(projects.id, projectId)).limit(1)
+	)[0];
+	if (!project) return { error: 'Project not found' };
+
+	const soRow = (
+		await db
+			.select({
+				so: salesOrders,
+				clientCompany: clientCoSO.name,
+				gcCompany: gcCoSO.name,
+				procurementMgrName: procurementMgrSO.name,
+				procurementMgrEmail: procurementMgrSO.email,
+				projectMgrName: projectMgrSO.name
+			})
+			.from(salesOrders)
+			.leftJoin(clientCoSO, eq(clientCoSO.id, projects.clientCompanyId))
+			.leftJoin(gcCoSO, eq(gcCoSO.id, projects.gcCompanyId))
+			.leftJoin(procurementMgrSO, eq(procurementMgrSO.id, salesOrders.procurementMgrUserId))
+			.leftJoin(projectMgrSO, eq(projectMgrSO.id, projects.projectManagerUserId))
+			.innerJoin(projects, eq(projects.id, salesOrders.projectId))
+			.where(and(eq(salesOrders.id, soId), eq(salesOrders.projectId, projectId)))
+			.limit(1)
+	)[0];
+	if (!soRow) return { error: 'SO not found' };
+	const so = soRow.so;
+
+	const lines = await db
+		.select()
+		.from(orderLines)
+		.where(eq(orderLines.salesOrderId, soId))
+		.orderBy(
+			orderLines.manufacturerNameSnapshot,
+			orderLines.typeNameSnapshot,
+			orderLines.catalogNoSnapshot
+		);
+	if (lines.length === 0) return { error: 'SO has no lines to send.' };
+
+	const usd = new Intl.NumberFormat('en-US', {
+		style: 'currency',
+		currency: 'USD',
+		minimumFractionDigits: 2,
+		maximumFractionDigits: 2
+	});
+
+	const emailLines: DocEmailLine[] = lines.map((l) => ({
+		c1: l.typeNameSnapshot,
+		c2: l.catalogNoSnapshot,
+		c3: l.manufacturerNameSnapshot,
+		c4: l.descriptionSnapshot,
+		c5: l.qty ? Number(l.qty).toLocaleString() : null,
+		c6: l.unitCn ? usd.format(Number(l.unitCn)) : null
+	}));
+
+	// SO totals computed the same way the workbench does
+	let subtotal = 0;
+	for (const l of lines) subtotal += Number(l.qty ?? 0) * Number(l.unitCn ?? 0);
+	const freightOverride = so.freightOverride ? Number(so.freightOverride) : null;
+	const freightPct = Number(so.freightPct ?? 0);
+	const freightAmt = freightOverride !== null ? freightOverride : subtotal * (freightPct / 100);
+	const addlFreight = Number(so.additionalFreight ?? 0);
+	const freightTotal = freightAmt + addlFreight;
+	const warehousingPct = Number(so.warehousingPct ?? 0);
+	const warehousingAmt = subtotal * (warehousingPct / 100);
+	const salesTaxPct = Number(so.salesTaxPct ?? 0);
+	const taxableBase = subtotal + freightTotal + warehousingAmt;
+	const salesTaxAmt = taxableBase * (salesTaxPct / 100);
+	const grandTotal = taxableBase + salesTaxAmt;
+
+	const appUrl = process.env.AUTH_URL ?? '';
+	const docUrl = appUrl ? `${appUrl}/projects/${projectId}/sos/${soId}` : '';
+
+	const pmName = soRow.procurementMgrName ?? soRow.projectMgrName ?? me.name ?? null;
+	const pmEmail = soRow.procurementMgrEmail ?? me.email;
+
+	const totalsLines = [
+		{ label: 'Subtotal (CN)', value: usd.format(subtotal) },
+		{
+			label: freightOverride !== null ? 'Freight (override)' : `Freight (${freightPct}%)`,
+			value: usd.format(freightAmt)
+		},
+		...(addlFreight > 0 ? [{ label: 'Additional freight', value: usd.format(addlFreight) }] : []),
+		...(warehousingPct > 0
+			? [{ label: `Warehousing (${warehousingPct}%)`, value: usd.format(warehousingAmt) }]
+			: []),
+		...(salesTaxPct > 0
+			? [
+					{
+						label: `${so.salesTaxName ?? 'Sales tax'} (${salesTaxPct}%)`,
+						value: usd.format(salesTaxAmt)
+					}
+				]
+			: [])
+	];
+
+	const html = renderDocEmailHtml({
+		docKindLabel: 'Sales Order',
+		docNo: so.soNo,
+		projectName: project.name,
+		recipientName: soRow.clientCompany,
+		pmName,
+		pmEmail,
+		customMessage: so.customEmailMessage,
+		columns: ['Type', 'Catalog #', 'Manufacturer', 'Description', 'Qty', 'Unit CN'],
+		lines: emailLines,
+		totalsLines,
+		grandLabel: 'Total',
+		grandValue: usd.format(grandTotal),
+		appUrl,
+		docUrl,
+		closing: 'Please confirm your approval of the items, quantities, and pricing above.'
+	});
+	const text = renderDocEmailText({
+		docKindLabel: 'Sales Order',
+		docNo: so.soNo,
+		projectName: project.name,
+		recipientName: soRow.clientCompany,
+		pmName,
+		pmEmail,
+		customMessage: so.customEmailMessage,
+		columns: ['Type', 'Catalog #', 'Manufacturer', 'Description', 'Qty', 'Unit CN'],
+		lines: emailLines,
+		totalsLines,
+		grandLabel: 'Total',
+		grandValue: usd.format(grandTotal),
+		appUrl,
+		docUrl,
+		closing: 'Please confirm your approval of the items, quantities, and pricing above.'
+	});
+
+	const deliveryAddress = [
+		project.deliveryStreet,
+		[project.deliveryCity, project.deliveryState, project.deliveryZip].filter(Boolean).join(' ')
+	]
+		.filter((s) => s && s.trim() !== '')
+		.join('\n');
+
+	const pdfData: SoPdfData = {
+		soNo: so.soNo,
+		status: so.status,
+		createdAt: so.createdAt.toISOString(),
+		confirmedAt: so.confirmedAt?.toISOString() ?? null,
+		sentAt: new Date().toISOString(),
+		description: so.description,
+		notes: so.notes,
+		customEmailMessage: so.customEmailMessage,
+		marginPct: so.marginPct,
+		freightPct: so.freightPct,
+		warehousingPct: so.warehousingPct,
+		salesTaxPct: so.salesTaxPct,
+		salesTaxName: so.salesTaxName,
+		additionalFreight: so.additionalFreight,
+		freightOverride: so.freightOverride,
+		projectName: project.name,
+		clientCompany: soRow.clientCompany,
+		gcCompany: soRow.gcCompany,
+		projectMgrName: soRow.projectMgrName,
+		procurementMgrName: soRow.procurementMgrName,
+		deliveryAddress: deliveryAddress || null,
+		lines: lines.map((l) => ({
+			type: l.typeNameSnapshot,
+			catalogNo: l.catalogNoSnapshot,
+			manufacturer: l.manufacturerNameSnapshot,
+			description: l.descriptionSnapshot,
+			qty: l.qty,
+			qtyType: l.qtyType,
+			unitCn: l.unitCn
+		}))
+	};
+	const pdfBuffer = await renderSoPdf(pdfData);
+
+	const result = await sendEmail({
+		to: recipients,
+		replyTo: pmEmail,
+		subject: `Sales Order ${so.soNo} — ${project.name}`,
+		html,
+		text,
+		attachments: [{ filename: `${so.soNo}.pdf`, content: pdfBuffer }]
+	});
+
+	if (!result.ok) return { error: result.error ?? 'Email send failed' };
+
+	// Auto-stamp sentAt + flip status to 'confirmed' if still draft
+	await db
+		.update(salesOrders)
+		.set({
+			status: so.status === 'draft' ? 'confirmed' : so.status,
+			sentAt: so.sentAt ?? new Date(),
+			confirmedAt:
+				so.status === 'draft' && !so.confirmedAt ? new Date() : so.confirmedAt,
+			updatedAt: new Date()
+		})
+		.where(eq(salesOrders.id, soId));
+
+	revalidatePath(`/projects/${projectId}/sos/${soId}`);
+	revalidatePath(`/projects/${projectId}/sos`);
+
+	return { ok: true, sentTo: recipients, redirectedTo: result.redirectedTo };
 }

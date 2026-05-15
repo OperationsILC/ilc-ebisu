@@ -5,13 +5,25 @@ import {
 	changeOrders,
 	changeOrderLines,
 	orderLines,
-	purchaseOrders
+	purchaseOrders,
+	projects,
+	companies,
+	users
 } from '@/lib/db/schema';
 import { requireUser } from '@/lib/dal';
 import { and, count, eq, inArray, sql } from 'drizzle-orm';
 import { revalidatePath } from 'next/cache';
 import { redirect } from 'next/navigation';
 import { z } from 'zod';
+import { sendEmail } from '@/lib/email';
+import {
+	renderDocEmailHtml,
+	renderDocEmailText,
+	parseEmails,
+	type DocEmailLine
+} from '@/lib/doc-email';
+import { renderChangeOrderPdf } from '@/lib/pdf/render';
+import { type ChangeOrderPdfData } from '@/lib/pdf/change-order';
 
 /**
  * Create a draft CO against a sent PO. Refuses if the PO has an open CO
@@ -575,4 +587,192 @@ async function recomputeCoTotal(coId: string): Promise<void> {
 		.update(changeOrders)
 		.set({ netAmountChange: total ?? '0', updatedAt: new Date() })
 		.where(eq(changeOrders.id, coId));
+}
+
+// ---------------------------------------------------------------------------
+// Send CO via email (PDF attached). Auto-stamps sentAt + flips status to sent
+// if still draft. Optimistically leaves the CO open for acknowledgement/apply.
+// ---------------------------------------------------------------------------
+
+export type SendCoResult = {
+	ok?: boolean;
+	error?: string;
+	sentTo?: string[];
+	redirectedTo?: string[];
+};
+
+export async function sendChangeOrderEmail(
+	projectId: string,
+	poId: string,
+	coId: string,
+	recipientsRaw: string
+): Promise<SendCoResult> {
+	const me = await requireUser();
+	const recipients = parseEmails(recipientsRaw);
+	if (recipients.length === 0)
+		return { error: 'At least one valid email recipient required.' };
+
+	const project = (await db.select().from(projects).where(eq(projects.id, projectId)).limit(1))[0];
+	if (!project) return { error: 'Project not found' };
+
+	const row = (
+		await db
+			.select({
+				co: changeOrders,
+				poNo: purchaseOrders.poNo,
+				repFirm: companies.name,
+				repFirmOrderEmails: companies.orderEmails,
+				pmName: users.name,
+				pmEmail: users.email
+			})
+			.from(changeOrders)
+			.innerJoin(purchaseOrders, eq(changeOrders.purchaseOrderId, purchaseOrders.id))
+			.leftJoin(companies, eq(purchaseOrders.repFirmCompanyId, companies.id))
+			.leftJoin(users, eq(users.id, changeOrders.createdByUserId))
+			.where(
+				and(
+					eq(changeOrders.id, coId),
+					eq(changeOrders.purchaseOrderId, poId),
+					eq(changeOrders.projectId, projectId)
+				)
+			)
+			.limit(1)
+	)[0];
+	if (!row) return { error: 'CO not found' };
+	const co = row.co;
+
+	const lines = await db
+		.select()
+		.from(changeOrderLines)
+		.where(eq(changeOrderLines.changeOrderId, coId))
+		.orderBy(changeOrderLines.createdAt);
+	if (lines.length === 0) return { error: 'CO has no lines yet.' };
+
+	const usd = new Intl.NumberFormat('en-US', {
+		style: 'currency',
+		currency: 'USD',
+		minimumFractionDigits: 2,
+		maximumFractionDigits: 2
+	});
+
+	const emailLines: DocEmailLine[] = lines.map((l) => {
+		const fmtDiff = (b: string | null, a: string | null): string | null => {
+			if (l.operation === 'add') return a !== null ? `+ ${a}` : null;
+			if (l.operation === 'remove') return b !== null ? `(removed) ${b}` : null;
+			if (b === a || a === null || b === null) return a ?? b;
+			return `${b} → ${a}`;
+		};
+		return {
+			c1: l.operation.toUpperCase(),
+			c2: fmtDiff(l.catalogNoBefore, l.catalogNoAfter),
+			c3: l.manufacturerAfter ?? l.manufacturerBefore,
+			c4: fmtDiff(l.descriptionBefore, l.descriptionAfter),
+			c5: fmtDiff(
+				l.qtyBefore ? Number(l.qtyBefore).toLocaleString() : null,
+				l.qtyAfter ? Number(l.qtyAfter).toLocaleString() : null
+			),
+			c6:
+				l.lineTotalDelta && Number(l.lineTotalDelta) !== 0
+					? `${Number(l.lineTotalDelta) > 0 ? '+' : ''}${usd.format(Number(l.lineTotalDelta))}`
+					: null
+		};
+	});
+
+	const netChange = Number(co.netAmountChange ?? 0);
+
+	const appUrl = process.env.AUTH_URL ?? '';
+	const docUrl = appUrl ? `${appUrl}/projects/${projectId}/pos/${poId}/change-orders/${coId}` : '';
+	const pmName = row.pmName ?? me.name ?? null;
+	const pmEmail = row.pmEmail ?? me.email;
+
+	const html = renderDocEmailHtml({
+		docKindLabel: 'Change Order',
+		docNo: co.coNo,
+		projectName: project.name,
+		recipientName: row.repFirm,
+		pmName,
+		pmEmail,
+		customMessage: co.description ?? co.customEmailMessage,
+		columns: ['Op', 'Catalog #', 'Manufacturer', 'Description', 'Qty', 'Δ $'],
+		lines: emailLines,
+		grandLabel: 'Net change to PO total',
+		grandValue: `${netChange > 0 ? '+' : ''}${usd.format(netChange)}`,
+		appUrl,
+		docUrl,
+		closing: `Please acknowledge receipt of ${co.coNo} against PO ${row.poNo} and confirm any pricing impacts.`
+	});
+	const text = renderDocEmailText({
+		docKindLabel: 'Change Order',
+		docNo: co.coNo,
+		projectName: project.name,
+		recipientName: row.repFirm,
+		pmName,
+		pmEmail,
+		customMessage: co.description ?? co.customEmailMessage,
+		columns: ['Op', 'Catalog #', 'Manufacturer', 'Description', 'Qty', 'Δ $'],
+		lines: emailLines,
+		grandLabel: 'Net change to PO total',
+		grandValue: `${netChange > 0 ? '+' : ''}${usd.format(netChange)}`,
+		appUrl,
+		docUrl,
+		closing: `Please acknowledge receipt of ${co.coNo} against PO ${row.poNo} and confirm any pricing impacts.`
+	});
+
+	const pdfData: ChangeOrderPdfData = {
+		coNo: co.coNo,
+		status: co.status,
+		createdAt: co.createdAt.toISOString(),
+		sentAt: new Date().toISOString(),
+		appliedAt: co.appliedAt?.toISOString() ?? null,
+		versionNoBefore: co.versionNoBefore,
+		versionNoAfter: co.versionNoAfter,
+		description: co.description,
+		customEmailMessage: co.customEmailMessage,
+		netAmountChange: co.netAmountChange,
+		projectName: project.name,
+		poNo: row.poNo,
+		repFirm: row.repFirm,
+		repFirmOrderEmails: row.repFirmOrderEmails,
+		pmName,
+		pmEmail,
+		lines: lines.map((l) => ({
+			operation: l.operation,
+			catalogNoBefore: l.catalogNoBefore,
+			catalogNoAfter: l.catalogNoAfter,
+			descriptionBefore: l.descriptionBefore,
+			descriptionAfter: l.descriptionAfter,
+			qtyBefore: l.qtyBefore,
+			qtyAfter: l.qtyAfter,
+			qtyType: l.qtyTypeAfter ?? l.qtyTypeBefore,
+			unitDnBefore: l.unitDnBefore,
+			unitDnAfter: l.unitDnAfter,
+			lineTotalDelta: l.lineTotalDelta,
+			reasonText: l.reasonText
+		}))
+	};
+	const pdfBuffer = await renderChangeOrderPdf(pdfData);
+
+	const result = await sendEmail({
+		to: recipients,
+		replyTo: pmEmail,
+		subject: `Change Order ${co.coNo} against PO ${row.poNo}`,
+		html,
+		text,
+		attachments: [{ filename: `${co.coNo}.pdf`, content: pdfBuffer }]
+	});
+
+	if (!result.ok) return { error: result.error ?? 'Email send failed' };
+
+	// Flip status to sent if still draft
+	if (co.status === 'draft') {
+		await db
+			.update(changeOrders)
+			.set({ status: 'sent', sentAt: new Date(), updatedAt: new Date() })
+			.where(eq(changeOrders.id, coId));
+	}
+
+	revalidatePath(`/projects/${projectId}/pos/${poId}/change-orders/${coId}`);
+	revalidatePath(`/projects/${projectId}/pos/${poId}/change-orders`);
+
+	return { ok: true, sentTo: recipients, redirectedTo: result.redirectedTo };
 }

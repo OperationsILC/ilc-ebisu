@@ -1,7 +1,8 @@
 'use client';
 
 import { useActionState, useMemo, useState, useTransition } from 'react';
-import { updatePoHeader, savePoLineEdits, type PoHeaderResult } from './actions';
+import { updatePoHeader, savePoLineEdits, sendPoEmail, type PoHeaderResult } from './actions';
+import { SendPanel } from '@/app/components/SendPanel';
 
 const usd = new Intl.NumberFormat('en-US', {
 	style: 'currency',
@@ -217,6 +218,25 @@ export default function PoDetailClient({
 
 			{flash && <p className="flash success">{flash}</p>}
 			{error && <p className="flash error">{error}</p>}
+
+			<SendPanel
+				docKindLabel="PO"
+				docNo={po.poNo}
+				defaultTo={po.sendToEmail ?? po.repFirmOrderEmails ?? ''}
+				onSend={async (to) => {
+					const r = await sendPoEmail(projectId, po.id, to);
+					if (r.error) errorThen(r.error);
+					else {
+						let msg = `Sent to ${r.sentTo?.join(', ') ?? ''}.`;
+						if (r.redirectedTo)
+							msg += ` (DEV_EMAIL_REDIRECT diverted to ${r.redirectedTo.join(', ')})`;
+						flashThen(msg);
+						setTimeout(() => window.location.reload(), 600);
+					}
+				}}
+				pending={pending}
+				startTransition={startTransition}
+			/>
 
 			<datalist id="qty-type-suggestions">
 				{QTY_TYPE_SUGGESTIONS.map((s) => (

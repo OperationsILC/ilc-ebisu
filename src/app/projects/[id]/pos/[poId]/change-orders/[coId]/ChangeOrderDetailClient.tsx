@@ -11,8 +11,10 @@ import {
 	markChangeOrderAcknowledged,
 	applyChangeOrder,
 	rejectChangeOrder,
-	cancelChangeOrder
+	cancelChangeOrder,
+	sendChangeOrderEmail
 } from '../actions';
+import { SendPanel } from '@/app/components/SendPanel';
 
 const usd = new Intl.NumberFormat('en-US', {
 	style: 'currency',
@@ -266,6 +268,29 @@ export default function ChangeOrderDetailClient({
 				<p className="flash error">
 					<strong>Rejected:</strong> {co.rejectedReason}
 				</p>
+			)}
+
+			{['draft', 'sent', 'acknowledged'].includes(co.status) && (
+				<SendPanel
+					docKindLabel="Change Order"
+					docNo={co.coNo}
+					defaultTo=""
+					onSend={async (to) => {
+						const r = await sendChangeOrderEmail(projectId, poId, co.id, to);
+						if (r.error) errorThen(r.error);
+						else {
+							let msg = `Sent to ${r.sentTo?.join(', ') ?? ''}.`;
+							if (r.redirectedTo)
+								msg += ` (DEV_EMAIL_REDIRECT diverted to ${r.redirectedTo.join(', ')})`;
+							flashThen(msg);
+							setTimeout(() => window.location.reload(), 600);
+						}
+					}}
+					pending={pending}
+					startTransition={startTransition}
+					disabled={lines.length === 0}
+					disabledReason="add at least one change first"
+				/>
 			)}
 
 			{/* === SUMMARY === */}

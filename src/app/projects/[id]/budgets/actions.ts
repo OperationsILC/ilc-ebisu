@@ -15,6 +15,15 @@ import { and, count, eq, inArray, sql } from 'drizzle-orm';
 import { revalidatePath } from 'next/cache';
 import { redirect } from 'next/navigation';
 import { z } from 'zod';
+import { sendEmail } from '@/lib/email';
+import {
+	renderDocEmailHtml,
+	renderDocEmailText,
+	parseEmails,
+	type DocEmailLine
+} from '@/lib/doc-email';
+import { renderBudgetPdf } from '@/lib/pdf/render';
+import { type BudgetPdfData } from '@/lib/pdf/budget';
 
 /**
  * Create a draft budget. Auto-numbers BU#####. Copies project financial
@@ -444,3 +453,186 @@ export async function cloneBudget(
 
 // silence unused-import lint
 void sql;
+
+// ---------------------------------------------------------------------------
+// Send budget via email (PDF attached). Flips status to 'sent' on success.
+// ---------------------------------------------------------------------------
+
+export type SendBudgetResult = {
+	ok?: boolean;
+	error?: string;
+	sentTo?: string[];
+	redirectedTo?: string[];
+};
+
+export async function sendBudgetEmail(
+	projectId: string,
+	budgetId: string,
+	recipientsRaw: string
+): Promise<SendBudgetResult> {
+	const me = await requireUser();
+	const recipients = parseEmails(recipientsRaw);
+	if (recipients.length === 0)
+		return { error: 'At least one valid email recipient required.' };
+
+	const project = (await db.select().from(projects).where(eq(projects.id, projectId)).limit(1))[0];
+	if (!project) return { error: 'Project not found' };
+
+	const budget = (
+		await db
+			.select()
+			.from(budgets)
+			.where(and(eq(budgets.id, budgetId), eq(budgets.projectId, projectId)))
+			.limit(1)
+	)[0];
+	if (!budget) return { error: 'Budget not found' };
+
+	const client = project.clientCompanyId
+		? (
+				await db
+					.select({ name: companies.name })
+					.from(companies)
+					.where(eq(companies.id, project.clientCompanyId))
+					.limit(1)
+			)[0]
+		: null;
+
+	const lines = await db
+		.select()
+		.from(budgetLines)
+		.where(eq(budgetLines.budgetId, budgetId))
+		.orderBy(budgetLines.manufacturerNameSnapshot, budgetLines.catalogNoSnapshot);
+	if (lines.length === 0) return { error: 'Budget has no lines to send.' };
+
+	const usd = new Intl.NumberFormat('en-US', {
+		style: 'currency',
+		currency: 'USD',
+		minimumFractionDigits: 2,
+		maximumFractionDigits: 2
+	});
+
+	const margin = Number(budget.marginPct ?? 0);
+	let subtotalDn = 0;
+	const emailLines: DocEmailLine[] = lines.map((l) => {
+		const qty = Number(l.qty ?? 0);
+		const dn = Number(l.unitDn ?? 0);
+		const lineDn = qty * dn;
+		const lineCn = lineDn * (1 + margin / 100);
+		subtotalDn += lineDn;
+		return {
+			c1: l.typeNameSnapshot,
+			c2: l.catalogNoSnapshot,
+			c3: l.manufacturerNameSnapshot,
+			c4: l.descriptionSnapshot,
+			c5: l.qty ? Number(l.qty).toLocaleString() : null,
+			c6: lineCn > 0 ? usd.format(lineCn) : null
+		};
+	});
+
+	const subtotalCn = subtotalDn * (1 + margin / 100);
+	const freightPct = Number(budget.freightPct ?? 0);
+	const freight = subtotalCn * (freightPct / 100);
+	const warehousingPct = Number(budget.warehousingPct ?? 0);
+	const warehousing = subtotalCn * (warehousingPct / 100);
+	const salesTaxPct = Number(budget.salesTaxPct ?? 0);
+	const taxableBase = subtotalCn + freight + warehousing;
+	const tax = taxableBase * (salesTaxPct / 100);
+	const grandTotal = taxableBase + tax;
+
+	const appUrl = process.env.AUTH_URL ?? '';
+	const docUrl = appUrl ? `${appUrl}/projects/${projectId}/budgets/${budgetId}` : '';
+
+	const totalsLines = [
+		{ label: 'DN Subtotal', value: usd.format(subtotalDn) },
+		{ label: `CN Subtotal (${margin}%)`, value: usd.format(subtotalCn) },
+		...(freight > 0 ? [{ label: `Freight (${freightPct}%)`, value: usd.format(freight) }] : []),
+		...(warehousing > 0
+			? [{ label: `Warehousing (${warehousingPct}%)`, value: usd.format(warehousing) }]
+			: []),
+		...(tax > 0 ? [{ label: `Tax (${salesTaxPct}%)`, value: usd.format(tax) }] : [])
+	];
+
+	const html = renderDocEmailHtml({
+		docKindLabel: 'Budget',
+		docNo: budget.budgetNo,
+		projectName: project.name,
+		recipientName: client?.name ?? null,
+		pmName: me.name ?? null,
+		pmEmail: me.email,
+		customMessage: budget.description,
+		columns: ['Type', 'Catalog #', 'Manufacturer', 'Description', 'Qty', 'Line CN'],
+		lines: emailLines,
+		totalsLines,
+		grandLabel: 'Budget Total',
+		grandValue: usd.format(grandTotal),
+		appUrl,
+		docUrl,
+		closing: 'Please review and confirm. Reach out with any line-by-line questions.'
+	});
+	const text = renderDocEmailText({
+		docKindLabel: 'Budget',
+		docNo: budget.budgetNo,
+		projectName: project.name,
+		recipientName: client?.name ?? null,
+		pmName: me.name ?? null,
+		pmEmail: me.email,
+		customMessage: budget.description,
+		columns: ['Type', 'Catalog #', 'Manufacturer', 'Description', 'Qty', 'Line CN'],
+		lines: emailLines,
+		totalsLines,
+		grandLabel: 'Budget Total',
+		grandValue: usd.format(grandTotal),
+		appUrl,
+		docUrl,
+		closing: 'Please review and confirm. Reach out with any line-by-line questions.'
+	});
+
+	const pdfData: BudgetPdfData = {
+		budgetNo: budget.budgetNo,
+		status: budget.status,
+		description: budget.description,
+		createdAt: budget.createdAt.toISOString(),
+		updatedAt: budget.updatedAt.toISOString(),
+		marginPct: budget.marginPct,
+		freightPct: budget.freightPct,
+		warehousingPct: budget.warehousingPct,
+		salesTaxPct: budget.salesTaxPct,
+		projectName: project.name,
+		clientCompany: client?.name ?? null,
+		totalSf: project.totalSf,
+		targetBudget: project.targetBudgetTotal,
+		targetDollarsPerSf: project.targetDollarsPerSf,
+		lines: lines.map((l) => ({
+			type: l.typeNameSnapshot,
+			catalogNo: l.catalogNoSnapshot,
+			manufacturer: l.manufacturerNameSnapshot,
+			description: l.descriptionSnapshot,
+			qty: l.qty,
+			unitDn: l.unitDn
+		}))
+	};
+	const pdfBuffer = await renderBudgetPdf(pdfData);
+
+	const result = await sendEmail({
+		to: recipients,
+		replyTo: me.email,
+		subject: `Budget ${budget.budgetNo} — ${project.name}${budget.description ? ` (${budget.description})` : ''}`,
+		html,
+		text,
+		attachments: [{ filename: `${budget.budgetNo}.pdf`, content: pdfBuffer }]
+	});
+
+	if (!result.ok) return { error: result.error ?? 'Email send failed' };
+
+	if (budget.status === 'draft') {
+		await db
+			.update(budgets)
+			.set({ status: 'sent', updatedAt: new Date() })
+			.where(eq(budgets.id, budgetId));
+	}
+
+	revalidatePath(`/projects/${projectId}/budgets/${budgetId}`);
+	revalidatePath(`/projects/${projectId}/budgets`);
+
+	return { ok: true, sentTo: recipients, redirectedTo: result.redirectedTo };
+}
