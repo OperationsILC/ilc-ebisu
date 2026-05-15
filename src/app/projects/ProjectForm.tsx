@@ -34,6 +34,8 @@ export type ProjectFormProps = {
 		salesTaxPct: string | null;
 		salesTaxName: string | null;
 		projectedDesignFeeTotal: string | null;
+		targetBudgetTotal: string | null;
+		targetDollarsPerSf: string | null;
 		emailsForBudgets: string | null;
 		emailsForQuotesSo: string | null;
 		emailsForShipmentUpdates: string | null;
@@ -409,18 +411,43 @@ export default function ProjectForm({
 					/>
 				</label>
 			</div>
-			<label style={{ display: 'block', marginTop: '12px' }}>
-				Projected design fee total $
-				<input
-					name="projectedDesignFeeTotal"
-					type="number"
-					step="0.01"
-					defaultValue={p?.projectedDesignFeeTotal ?? ''}
-					disabled={pending}
-					placeholder="Top-line forecast of design-fee revenue for this project"
-					style={{ width: '320px' }}
-				/>
-			</label>
+			<div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '12px', marginTop: '12px' }}>
+				<label>
+					Projected design fee total $
+					<input
+						name="projectedDesignFeeTotal"
+						type="number"
+						step="0.01"
+						defaultValue={p?.projectedDesignFeeTotal ?? ''}
+						disabled={pending}
+						placeholder="Design-fee revenue forecast"
+						style={{ width: '100%' }}
+					/>
+				</label>
+				<label>
+					Target product budget $
+					<input
+						name="targetBudgetTotal"
+						type="number"
+						step="0.01"
+						defaultValue={p?.targetBudgetTotal ?? ''}
+						disabled={pending}
+						placeholder="What budgets compare against"
+						style={{ width: '100%' }}
+					/>
+				</label>
+				<label>
+					Target $/SF
+					<input
+						name="targetDollarsPerSf"
+						type="number"
+						step="0.01"
+						defaultValue={p?.targetDollarsPerSf ?? ''}
+						disabled={pending}
+						style={{ width: '100%' }}
+					/>
+				</label>
+			</div>
 
 			{/* === EMAIL ROUTING === */}
 			<h2 style={{ marginTop: '24px' }}>Project-level email overrides</h2>

@@ -37,6 +37,8 @@ const ProjectFormSchema = z.object({
 	salesTaxPct: z.string().optional(),
 	salesTaxName: z.string().optional(),
 	projectedDesignFeeTotal: z.string().optional(),
+	targetBudgetTotal: z.string().optional(),
+	targetDollarsPerSf: z.string().optional(),
 
 	emailsForBudgets: z.string().optional(),
 	emailsForQuotesSo: z.string().optional(),
@@ -134,6 +136,8 @@ function buildValues(v: z.infer<typeof ProjectFormSchema>): Partial<NewProject> 
 		salesTaxPct: emptyToNullNumeric(v.salesTaxPct),
 		salesTaxName: emptyToNull(v.salesTaxName),
 		projectedDesignFeeTotal: emptyToNullNumeric(v.projectedDesignFeeTotal),
+		targetBudgetTotal: emptyToNullNumeric(v.targetBudgetTotal),
+		targetDollarsPerSf: emptyToNullNumeric(v.targetDollarsPerSf),
 
 		emailsForBudgets: emptyToNull(v.emailsForBudgets),
 		emailsForQuotesSo: emptyToNull(v.emailsForQuotesSo),

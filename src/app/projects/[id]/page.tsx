@@ -9,7 +9,8 @@ import {
 	purchaseOrders,
 	shipments,
 	invoices,
-	bills
+	bills,
+	budgets
 } from '@/lib/db/schema';
 import { eq, count, desc, sql } from 'drizzle-orm';
 import { notFound } from 'next/navigation';
@@ -77,6 +78,11 @@ export default async function ProjectDetailPage({
 		.from(bills)
 		.where(eq(bills.projectId, id));
 
+	const [{ budgetCount }] = await db
+		.select({ budgetCount: count() })
+		.from(budgets)
+		.where(eq(budgets.projectId, id));
+
 	// Top 5 manufacturers by line count
 	const topMfrs = await db
 		.select({
@@ -122,7 +128,10 @@ export default async function ProjectDetailPage({
 				 · created {new Date(p.createdAt).toLocaleDateString()}
 			</p>
 
-			<div style={{ display: 'flex', gap: '12px', margin: '16px 0' }}>
+			<div style={{ display: 'flex', gap: '12px', margin: '16px 0', flexWrap: 'wrap' }}>
+				<a href={`/projects/${p.id}/budgets`}>
+					<button>Budgets ({budgetCount})</button>
+				</a>
 				<a href={`/projects/${p.id}/qap`}>
 					<button className="primary">Open QAP ({totalLines} lines)</button>
 				</a>

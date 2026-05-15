@@ -52,6 +52,8 @@ export default async function EditProjectPage({
 					salesTaxPct: project.salesTaxPct,
 					salesTaxName: project.salesTaxName,
 					projectedDesignFeeTotal: project.projectedDesignFeeTotal,
+					targetBudgetTotal: project.targetBudgetTotal,
+					targetDollarsPerSf: project.targetDollarsPerSf,
 					emailsForBudgets: project.emailsForBudgets,
 					emailsForQuotesSo: project.emailsForQuotesSo,
 					emailsForShipmentUpdates: project.emailsForShipmentUpdates,

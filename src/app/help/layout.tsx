@@ -4,6 +4,7 @@ const TOPICS = [
 	{ slug: 'getting-started', label: 'Getting started' },
 	{ slug: 'projects', label: 'Projects' },
 	{ slug: 'qap', label: 'QAP — Quantity And Pricing' },
+	{ slug: 'budgets', label: 'Budgets' },
 	{ slug: 'rfqs', label: 'RFQs — requesting quotes' },
 	{ slug: 'sales-orders', label: 'Sales Orders' },
 	{ slug: 'purchase-orders', label: 'Purchase Orders' },

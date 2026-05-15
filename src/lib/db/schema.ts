@@ -192,6 +192,10 @@ export const projects = pgTable('projects', {
 	projectedDesignFeeTotal: numeric('projected_design_fee_total'),
 	// Top-level forecast of design fee revenue. Distinct from the
 	// running total computed from design-fee invoices.
+	targetBudgetTotal: numeric('target_budget_total'),
+	// Top-line product-budget target. Budgets compare against this.
+	targetDollarsPerSf: numeric('target_dollars_per_sf'),
+	// Target $/SF for the project. Budget detail page shows actual vs target.
 
 	// Project-level email overrides — when set, these win over the
 	// company-default emails (which apply when a project doesn't override)
@@ -392,39 +396,59 @@ export const budgets = pgTable('budgets', {
 	projectId: uuid('project_id')
 		.notNull()
 		.references(() => projects.id, { onDelete: 'cascade' }),
-	budgetNo: text('budget_no'),
+	budgetNo: text('budget_no').notNull().unique(),
+	// e.g. "BU00123"
 	status: text('status').notNull().default('draft'),
 	// draft | sent | confirmed | archived
 	description: text('description'),
+	// Free-text label — e.g. "FINAL UPDATE", "SUBMITTAL & RFI UPDATES", "GMP SET",
+	// "IFC SET", "PERMIT SET". Sean's team versions budgets at design milestones.
+
 	marginPct: numeric('margin_pct'),
 	freightPct: numeric('freight_pct'),
 	warehousingPct: numeric('warehousing_pct'),
 	salesTaxPct: numeric('sales_tax_pct'),
+	// Per-budget overrides; default-copy from project at creation.
+
 	notes: text('notes'),
+	rowVersion: bigint('row_version', { mode: 'number' }).notNull().default(1),
 	createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+	updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
 	createdByUserId: uuid('created_by_user_id').references(() => users.id)
 });
 
-export const budgetLines = pgTable('budget_lines', {
-	id: uuid('id').defaultRandom().primaryKey(),
-	budgetId: uuid('budget_id')
-		.notNull()
-		.references(() => budgets.id, { onDelete: 'cascade' }),
-	qapLineId: uuid('qap_line_id')
-		.notNull()
-		.references(() => qapLines.id, { onDelete: 'restrict' }),
+export const budgetLines = pgTable(
+	'budget_lines',
+	{
+		id: uuid('id').defaultRandom().primaryKey(),
+		budgetId: uuid('budget_id')
+			.notNull()
+			.references(() => budgets.id, { onDelete: 'cascade' }),
+		// QAP line is the snapshot source. set null on QAP deletion so historical
+		// budgets don't lose their data — the snapshot fields stay populated.
+		qapLineId: uuid('qap_line_id').references(() => qapLines.id, { onDelete: 'set null' }),
 
-	// Snapshot of QAP values at budget-creation time.
-	typeNameSnapshot: text('type_name_snapshot'),
-	catalogNoSnapshot: text('catalog_no_snapshot'),
-	manufacturerNameSnapshot: text('manufacturer_name_snapshot'),
-	descriptionSnapshot: text('description_snapshot'),
-	qtySnapshot: numeric('qty_snapshot'),
-	currentDnSnapshot: numeric('current_dn_snapshot'),
-	marginPctSnapshot: numeric('margin_pct_snapshot'),
+		// Snapshot of QAP values at budget-creation time.
+		typeNameSnapshot: text('type_name_snapshot'),
+		catalogNoSnapshot: text('catalog_no_snapshot'),
+		manufacturerNameSnapshot: text('manufacturer_name_snapshot'),
+		descriptionSnapshot: text('description_snapshot'),
+		qtySnapshot: numeric('qty_snapshot'),
+		qtyTypeSnapshot: text('qty_type_snapshot'),
+		currentDnSnapshot: numeric('current_dn_snapshot'),
+		marginPctSnapshot: numeric('margin_pct_snapshot'),
+		// Editable per-budget — PMs can tweak qty/unit_dn on a budget without
+		// touching the QAP. Useful for "what-if" budgeting.
+		qty: numeric('qty'),
+		unitDn: numeric('unit_dn'),
 
-	createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow()
-});
+		createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow()
+	},
+	(t) => [
+		index('budget_lines_budget_idx').on(t.budgetId),
+		index('budget_lines_qap_idx').on(t.qapLineId)
+	]
+);
 
 // ---------------------------------------------------------------------------
 // RFQs (Request For Quote)
@@ -1161,6 +1185,10 @@ export type ChangeOrder = typeof changeOrders.$inferSelect;
 export type NewChangeOrder = typeof changeOrders.$inferInsert;
 export type ChangeOrderLine = typeof changeOrderLines.$inferSelect;
 export type NewChangeOrderLine = typeof changeOrderLines.$inferInsert;
+export type Budget = typeof budgets.$inferSelect;
+export type NewBudget = typeof budgets.$inferInsert;
+export type BudgetLine = typeof budgetLines.$inferSelect;
+export type NewBudgetLine = typeof budgetLines.$inferInsert;
 export type Company = typeof companies.$inferSelect;
 export type NewCompany = typeof companies.$inferInsert;
 export type QapLine = typeof qapLines.$inferSelect;
