@@ -18,6 +18,8 @@ import { revalidatePath } from 'next/cache';
 import { z } from 'zod';
 import { sendEmail } from '@/lib/email';
 import { renderRfqEmailHtml, renderRfqEmailText } from '@/lib/rfq-email';
+import { renderRfqPdf } from '@/lib/pdf/render';
+import { type RfqPdfData } from '@/lib/pdf/rfq';
 
 const VALID_STATUSES = ['draft', 'sent', 'quoted', 'accepted', 'declined', 'cancelled'] as const;
 type RfqStatus = (typeof VALID_STATUSES)[number];
@@ -389,12 +391,44 @@ export async function sendRfqEmail(projectId: string, rfqId: string): Promise<Se
 		rfqUrl
 	};
 
+	// Render the RFQ PDF and attach to the email so the rep firm gets a
+	// branded document alongside the inline HTML table. The HTML stays —
+	// rep firms often paste prices into the email reply directly, and the
+	// PDF is the canonical reference.
+	const pdfData: RfqPdfData = {
+		rfqNo: rfq.rfqNo,
+		status: rfq.status,
+		createdAt: new Date().toISOString(),
+		sentAt: new Date().toISOString(),
+		notes: rfq.notes,
+		projectName: project.name,
+		repFirm: repFirm.name,
+		repFirmQuoteEmails: repFirm.quoteEmails,
+		pmName,
+		pmEmail,
+		lines: lines.map((l) => ({
+			type: l.type,
+			catalogNo: l.catalogNo,
+			manufacturer: l.manufacturer,
+			description: l.description,
+			qty: l.qty,
+			qtyType: null
+		}))
+	};
+	const pdfBuffer = await renderRfqPdf(pdfData);
+
 	const result = await sendEmail({
 		to: toList,
 		replyTo: pmEmail,
 		subject: `RFQ ${rfq.rfqNo} — ${project.name}`,
 		html: renderRfqEmailHtml(ctx),
-		text: renderRfqEmailText(ctx)
+		text: renderRfqEmailText(ctx),
+		attachments: [
+			{
+				filename: `${rfq.rfqNo}.pdf`,
+				content: pdfBuffer
+			}
+		]
 	});
 
 	if (!result.ok) {

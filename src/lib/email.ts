@@ -9,6 +9,11 @@ function client(): Resend | null {
 	return _resend;
 }
 
+export type EmailAttachment = {
+	filename: string;
+	content: Buffer;
+};
+
 export type SendEmailArgs = {
 	to: string[];
 	cc?: string[];
@@ -16,6 +21,7 @@ export type SendEmailArgs = {
 	subject: string;
 	html: string;
 	text?: string;
+	attachments?: EmailAttachment[];
 };
 
 export type SendEmailResult = {
@@ -61,7 +67,11 @@ export async function sendEmail(args: SendEmailArgs): Promise<SendEmailResult> {
 			replyTo: args.replyTo,
 			subject,
 			html: args.html,
-			text: args.text
+			text: args.text,
+			attachments: args.attachments?.map((a) => ({
+				filename: a.filename,
+				content: a.content
+			}))
 		});
 		if (result.error) {
 			return { ok: false, error: result.error.message };
