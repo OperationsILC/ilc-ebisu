@@ -109,9 +109,17 @@ export default async function ProjectDetailPage({
 				<a href="/projects">← all projects</a>
 			</p>
 
-			<h1>{p.name}</h1>
+			<div style={{ display: 'flex', alignItems: 'baseline', gap: '12px', flexWrap: 'wrap' }}>
+				<h1 style={{ margin: 0 }}>{p.name}</h1>
+				<a href={`/projects/${p.id}/edit`} style={{ fontSize: '13px' }}>
+					Edit project ↗
+				</a>
+			</div>
 			<p className="muted">
-				{p.status} · created {new Date(p.createdAt).toLocaleDateString()}
+				{p.status}
+				{p.phase && <> · {p.phase}</>}
+				{p.projectType && <> · {p.projectType}</>}
+				 · created {new Date(p.createdAt).toLocaleDateString()}
 			</p>
 
 			<div style={{ display: 'flex', gap: '12px', margin: '16px 0' }}>
@@ -216,8 +224,12 @@ export default async function ProjectDetailPage({
 			)}
 
 			<h2 style={{ marginTop: '24px' }}>Settings</h2>
-			<table className="plain" style={{ maxWidth: '720px' }}>
+			<table className="plain" style={{ maxWidth: '900px' }}>
 				<tbody>
+					<tr>
+						<th>Service type</th>
+						<td>{p.serviceType ?? '—'}</td>
+					</tr>
 					<tr>
 						<th>Margin %</th>
 						<td>{p.marginPct ?? '—'}</td>
@@ -231,27 +243,110 @@ export default async function ProjectDetailPage({
 						<td>{p.warehousingPct ?? '—'}</td>
 					</tr>
 					<tr>
-						<th>Sales tax %</th>
-						<td>{p.salesTaxPct ?? '—'}</td>
+						<th>Sales tax</th>
+						<td>
+							{p.salesTaxPct ? `${p.salesTaxPct}%` : '—'}
+							{p.salesTaxName && <span className="muted"> · {p.salesTaxName}</span>}
+						</td>
 					</tr>
 					<tr>
-						<th>Delivery</th>
+						<th>Projected design fee total</th>
+						<td>{p.projectedDesignFeeTotal ? `$${p.projectedDesignFeeTotal}` : '—'}</td>
+					</tr>
+					<tr>
+						<th>IFC sub date</th>
+						<td>{p.ifcSubDate ? new Date(p.ifcSubDate).toLocaleDateString() : '—'}</td>
+					</tr>
+					<tr>
+						<th>Expected order date</th>
+						<td>{p.expectedOrderDate ? new Date(p.expectedOrderDate).toLocaleDateString() : '—'}</td>
+					</tr>
+					<tr>
+						<th>Delivery address</th>
 						<td>
 							{[p.deliveryStreet, p.deliveryCity, p.deliveryState, p.deliveryZip]
 								.filter(Boolean)
 								.join(' ') || '—'}
+							{p.deliverySiteContactName && (
+								<div className="muted">
+									{p.deliverySiteContactName}
+									{p.deliverySiteContactPhone && ` · ${p.deliverySiteContactPhone}`}
+								</div>
+							)}
 						</td>
 					</tr>
 					<tr>
-						<th>Description</th>
-						<td>{p.description ?? '—'}</td>
+						<th>Job site address</th>
+						<td>
+							{[p.siteStreet, p.siteCity, p.siteState, p.siteZip]
+								.filter(Boolean)
+								.join(' ') || '—'}
+							{p.jobSiteContactName && (
+								<div className="muted">
+									{p.jobSiteContactName}
+									{p.jobSiteContactPhone && ` · ${p.jobSiteContactPhone}`}
+								</div>
+							)}
+						</td>
 					</tr>
+					<tr>
+						<th>Square footage</th>
+						<td>
+							{p.totalSf
+								? `${num.format(p.totalSf)} SF total`
+								: '—'}
+							{p.interiorSf ? ` · ${num.format(p.interiorSf)} interior` : ''}
+							{p.exteriorSf ? ` · ${num.format(p.exteriorSf)} exterior` : ''}
+							{p.numUnitsRooms ? ` · ${num.format(p.numUnitsRooms)} units/rooms` : ''}
+						</td>
+					</tr>
+					<tr>
+						<th>Project emails</th>
+						<td>
+							{p.emailsForBudgets || p.emailsForQuotesSo || p.emailsForShipmentUpdates ? (
+								<>
+									{p.emailsForBudgets && (
+										<div>
+											<span className="muted">Budgets:</span> {p.emailsForBudgets}
+										</div>
+									)}
+									{p.emailsForQuotesSo && (
+										<div>
+											<span className="muted">Quotes/SOs:</span> {p.emailsForQuotesSo}
+										</div>
+									)}
+									{p.emailsForShipmentUpdates && (
+										<div>
+											<span className="muted">Shipment updates:</span>{' '}
+											{p.emailsForShipmentUpdates}
+										</div>
+									)}
+								</>
+							) : (
+								<span className="muted">— (using company defaults)</span>
+							)}
+						</td>
+					</tr>
+					{p.description && (
+						<tr>
+							<th>Description</th>
+							<td>{p.description}</td>
+						</tr>
+					)}
+					{p.notes && (
+						<tr>
+							<th>Notes</th>
+							<td style={{ whiteSpace: 'pre-wrap' }}>{p.notes}</td>
+						</tr>
+					)}
+					{p.projectStats && (
+						<tr>
+							<th>Project stats</th>
+							<td style={{ whiteSpace: 'pre-wrap' }}>{p.projectStats}</td>
+						</tr>
+					)}
 				</tbody>
 			</table>
-
-			<p className="muted" style={{ marginTop: '24px' }}>
-				Edit form coming. For now, recreate to change settings.
-			</p>
 		</>
 	);
 }
