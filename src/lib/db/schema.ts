@@ -9,7 +9,8 @@ import {
 	timestamp,
 	jsonb,
 	unique,
-	index
+	index,
+	primaryKey
 } from 'drizzle-orm/pg-core';
 import { sql } from 'drizzle-orm';
 
@@ -366,6 +367,14 @@ export const qapLines = pgTable(
 		notes: text('notes'),
 		description: text('description'),
 
+		// ShipQAP planning fields — forward-looking, PM-managed expectations.
+		// Decoupled from the shipments table because Olivia needs to log these
+		// before a PO exists. Coexists with real shipments: these are "what was
+		// planned," shipments are "what actually happened."
+		expectedShipDate: timestamp('expected_ship_date', { withTimezone: true }),
+		expectedArrivalDate: timestamp('expected_arrival_date', { withTimezone: true }),
+		expectedShipNotes: text('expected_ship_notes'),
+
 		// Original designer-specified manufacturer/spec. Write-once on first
 		// import; never overwritten on re-import or PM edit. Preserves the
 		// audit trail of "what did the designer actually specify."
@@ -391,6 +400,31 @@ export const qapLines = pgTable(
 		unique('qap_lines_project_type_product_uq').on(t.projectId, t.typeId, t.productId),
 		index('qap_lines_project_idx').on(t.projectId),
 		index('qap_lines_source_hash_idx').on(t.sourceRowHash)
+	]
+);
+
+// ---------------------------------------------------------------------------
+// ShipQAP — per-user hide list
+// ---------------------------------------------------------------------------
+// Each PM curates their own ShipQAP view by hiding lines they don't want to
+// see. Junction table because the underlying QAP line shouldn't know or care
+// who's hidden it — and the same line can be hidden by some PMs but not
+// others. Composite PK (user_id, qap_line_id) makes "toggle hide" trivially
+// idempotent via DELETE + INSERT or upsert.
+export const shipQapHiddenLines = pgTable(
+	'ship_qap_hidden_lines',
+	{
+		userId: uuid('user_id')
+			.notNull()
+			.references(() => users.id, { onDelete: 'cascade' }),
+		qapLineId: uuid('qap_line_id')
+			.notNull()
+			.references(() => qapLines.id, { onDelete: 'cascade' }),
+		hiddenAt: timestamp('hidden_at', { withTimezone: true }).notNull().defaultNow()
+	},
+	(t) => [
+		primaryKey({ columns: [t.userId, t.qapLineId] }),
+		index('ship_qap_hidden_lines_user_idx').on(t.userId)
 	]
 );
 
@@ -1234,6 +1268,8 @@ export type BudgetLine = typeof budgetLines.$inferSelect;
 export type NewBudgetLine = typeof budgetLines.$inferInsert;
 export type QboConnection = typeof qboConnections.$inferSelect;
 export type NewQboConnection = typeof qboConnections.$inferInsert;
+export type ShipQapHiddenLine = typeof shipQapHiddenLines.$inferSelect;
+export type NewShipQapHiddenLine = typeof shipQapHiddenLines.$inferInsert;
 export type Company = typeof companies.$inferSelect;
 export type NewCompany = typeof companies.$inferInsert;
 export type QapLine = typeof qapLines.$inferSelect;

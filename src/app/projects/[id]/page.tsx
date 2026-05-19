@@ -196,6 +196,9 @@ export default async function ProjectDetailPage({
 					<a href={`/projects/${p.id}/shipments`}>
 						<button>Shipments ({shipmentCount})</button>
 					</a>
+					<a href={`/projects/${p.id}/ship-qap`}>
+						<button>Ship QAP</button>
+					</a>
 				</StageRow>
 
 				<StageRow label="Bill" color="#dc3545">

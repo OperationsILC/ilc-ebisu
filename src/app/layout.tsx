@@ -21,6 +21,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
 					<a href="/sos">SOs</a>
 					<a href="/pos">POs</a>
 					<a href="/shipments">Shipments</a>
+					<a href="/ship-qap">Ship QAP</a>
 					<a href="/invoices">Invoices</a>
 					<a href="/bills">Bills</a>
 					<span className="nav-sep">|</span>

@@ -1,6 +1,6 @@
 import { db } from '@/lib/db';
 import { projects, companies, bills, qboConnections } from '@/lib/db/schema';
-import { desc, count, eq, and, isNull, sql } from 'drizzle-orm';
+import { desc, count, eq, isNull, sql } from 'drizzle-orm';
 import TabHelp from './components/TabHelp';
 
 export default async function HomePage() {
@@ -194,6 +194,11 @@ export default async function HomePage() {
 							href="/shipments"
 							label="Shipments"
 							hint="Every expected and received shipment. See what&rsquo;s arriving and what landed."
+						/>
+						<NavRow
+							href="/ship-qap"
+							label="Ship QAP"
+							hint="Every QAP line with its procurement + shipment status alongside, plus expected ship/arrival dates you can plan against before a PO exists."
 						/>
 						<NavRow
 							href="/invoices"
