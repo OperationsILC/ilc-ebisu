@@ -2,6 +2,7 @@ import './globals.css';
 import type { Metadata } from 'next';
 import { getCurrentUser } from '@/lib/dal';
 import SignOutButton from '@/components/SignOutButton';
+import WishbringerLink from '@/app/components/WishbringerLink';
 
 export const metadata: Metadata = {
 	title: 'Ebisu',
@@ -30,6 +31,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
 					<span className="nav-sep">|</span>
 					<a href="/qbo">QBO</a>
 					<a href="/help">Help</a>
+					<WishbringerLink />
 					<span className="spacer" />
 					{user ? (
 						<>

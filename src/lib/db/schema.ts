@@ -1201,6 +1201,54 @@ export const qboConnections = pgTable('qbo_connections', {
 });
 
 // ---------------------------------------------------------------------------
+// Wishbringer — user feedback journal
+// ---------------------------------------------------------------------------
+// A signed-in user can drop a "wish" (suggestion / bug report / idea) from
+// anywhere in the app. Each wish captures the URL they were on, has a
+// status, and threads comments underneath. Sean exports the whole journal
+// as markdown to triage with Claude.
+
+export const wishes = pgTable(
+	'wishes',
+	{
+		id: uuid('id').defaultRandom().primaryKey(),
+		userId: uuid('user_id')
+			.notNull()
+			.references(() => users.id, { onDelete: 'restrict' }),
+		urlAtSubmission: text('url_at_submission'),
+		body: text('body').notNull(),
+		status: text('status').notNull().default('open'),
+		// open | in_progress | done | wont_do
+		resolvedAt: timestamp('resolved_at', { withTimezone: true }),
+		resolvedByUserId: uuid('resolved_by_user_id').references(() => users.id, {
+			onDelete: 'set null'
+		}),
+		createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+		updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow()
+	},
+	(t) => [index('wishes_user_idx').on(t.userId), index('wishes_status_idx').on(t.status)]
+);
+
+export const wishComments = pgTable(
+	'wish_comments',
+	{
+		id: uuid('id').defaultRandom().primaryKey(),
+		wishId: uuid('wish_id')
+			.notNull()
+			.references(() => wishes.id, { onDelete: 'cascade' }),
+		userId: uuid('user_id')
+			.notNull()
+			.references(() => users.id, { onDelete: 'restrict' }),
+		body: text('body').notNull(),
+		// Devs flag this when pasting Claude's response. UI + export render
+		// these distinctly so the journal shows the closed loop.
+		isClaudeNote: boolean('is_claude_note').notNull().default(false),
+		createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow()
+	},
+	(t) => [index('wish_comments_wish_idx').on(t.wishId)]
+);
+
+// ---------------------------------------------------------------------------
 // Cell-level audit log
 // ---------------------------------------------------------------------------
 // One row per cell change, not per row change. Keeps the table size proportional
@@ -1270,6 +1318,10 @@ export type QboConnection = typeof qboConnections.$inferSelect;
 export type NewQboConnection = typeof qboConnections.$inferInsert;
 export type ShipQapHiddenLine = typeof shipQapHiddenLines.$inferSelect;
 export type NewShipQapHiddenLine = typeof shipQapHiddenLines.$inferInsert;
+export type Wish = typeof wishes.$inferSelect;
+export type NewWish = typeof wishes.$inferInsert;
+export type WishComment = typeof wishComments.$inferSelect;
+export type NewWishComment = typeof wishComments.$inferInsert;
 export type Company = typeof companies.$inferSelect;
 export type NewCompany = typeof companies.$inferInsert;
 export type QapLine = typeof qapLines.$inferSelect;
