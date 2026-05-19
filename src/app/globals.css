@@ -43,6 +43,11 @@ nav.app-nav a:hover {
 nav.app-nav .spacer {
 	flex: 1;
 }
+nav.app-nav .nav-sep {
+	color: #555;
+	margin: 0 -4px;
+	user-select: none;
+}
 nav.app-nav .user {
 	color: #aaa;
 	font-size: 12px;

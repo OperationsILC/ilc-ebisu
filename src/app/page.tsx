@@ -47,29 +47,37 @@ export default async function HomePage() {
 
 			<TabHelp tabKey="home" title="Welcome — here&rsquo;s where things live">
 				<p style={{ margin: '0 0 6px' }}>
-					Ebisu is organized around <strong>projects</strong>. Most of your day-to-day work
-					(QAP edits, RFQs, sales orders, purchase orders, shipments, invoices, bills) happens
-					inside a project. Open one from the list below or via the <strong>Projects</strong>{' '}
-					link in the top nav.
+					Ebisu is organized around <strong>projects</strong>, but every workflow
+					stage also has a <em>cross-project</em> view at the top nav. Two ways to find
+					the same record:
 				</p>
-				<p style={{ margin: '6px 0' }}>The other top-level tabs:</p>
 				<ul style={{ margin: '6px 0', paddingLeft: '20px' }}>
 					<li>
-						<strong>Companies</strong> — the master list of clients, GCs, manufacturers, rep
-						firms, and designers. This is also where you link a company to its QuickBooks
+						<strong>By project</strong> — open <strong>Projects</strong>, pick one, drill
+						into its QAP / RFQs / SOs / etc. Use this when you&apos;re focused on one job.
+					</li>
+					<li>
+						<strong>Across projects</strong> — use the top-nav links{' '}
+						<strong>RFQs</strong>, <strong>SOs</strong>, <strong>POs</strong>,{' '}
+						<strong>Shipments</strong>, <strong>Invoices</strong>, <strong>Bills</strong>{' '}
+						to see every record of that kind, filterable by project and status. Use this
+						when you&apos;re asking &quot;what&apos;s in flight right now?&quot;
+					</li>
+				</ul>
+				<p style={{ margin: '6px 0' }}>And the supporting workspaces:</p>
+				<ul style={{ margin: '6px 0', paddingLeft: '20px' }}>
+					<li>
+						<strong>Companies</strong> — master list of clients, GCs, manufacturers, rep
+						firms, and designers. This is where you link a company to its QuickBooks
 						Online Customer / Vendor record.
 					</li>
 					<li>
-						<strong>Bills inbox</strong> — vendor bills awaiting review across all projects.
-						Use this when a manufacturer email arrives and you need to triage.
-					</li>
-					<li>
 						<strong>QBO</strong> — settings for the QuickBooks Online integration:
-						connect/disconnect, default income/COGS accounts, sandbox vs production toggle.
+						connect/disconnect, default income/COGS accounts, sandbox vs production.
 					</li>
 					<li>
-						<strong>Help</strong> — long-form documentation on every concept. Each project
-						sub-tab also has its own quick-help banner like this one.
+						<strong>Help</strong> — long-form documentation on every concept. Each tab
+						also has its own quick-help banner like this one.
 					</li>
 				</ul>
 				<p style={{ margin: '6px 0 0' }}>
@@ -160,7 +168,7 @@ export default async function HomePage() {
 				</section>
 
 				<section>
-					<h2 style={{ marginBottom: 8 }}>Cross-project tools</h2>
+					<h2 style={{ marginBottom: 8 }}>Cross-project workspaces</h2>
 					<ul style={{ listStyle: 'none', padding: 0, margin: 0, fontSize: '14px' }}>
 						<NavRow
 							href="/projects"
@@ -168,14 +176,39 @@ export default async function HomePage() {
 							hint="Every project ILC is running, with status filters."
 						/>
 						<NavRow
-							href="/companies"
-							label="Companies"
-							hint="Clients, GCs, designers, manufacturers, rep firms — all in one master list with QBO links."
+							href="/rfqs"
+							label="RFQs"
+							hint="Every Request For Quote, across all projects. Filter by status to chase reps."
+						/>
+						<NavRow
+							href="/sos"
+							label="Sales Orders"
+							hint="Every SO, across all projects. See what&rsquo;s sold, shipped, invoiced."
+						/>
+						<NavRow
+							href="/pos"
+							label="Purchase Orders"
+							hint="Every PO ILC has issued. Filter by status or rep firm to find outstanding orders."
+						/>
+						<NavRow
+							href="/shipments"
+							label="Shipments"
+							hint="Every expected and received shipment. See what&rsquo;s arriving and what landed."
+						/>
+						<NavRow
+							href="/invoices"
+							label="Invoices"
+							hint="AR rollup — every invoice across projects, with QBO push state."
 						/>
 						<NavRow
 							href="/bills"
 							label="Bills inbox"
-							hint="Vendor bills awaiting review, across every project."
+							hint="Vendor bills awaiting review across all projects."
+						/>
+						<NavRow
+							href="/companies"
+							label="Companies"
+							hint="Clients, GCs, designers, manufacturers, rep firms — master list with QBO links."
 						/>
 						<NavRow
 							href="/qbo"

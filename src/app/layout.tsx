@@ -16,9 +16,16 @@ export default async function RootLayout({ children }: { children: React.ReactNo
 				<nav className="app-nav">
 					<strong>Ebisu</strong>
 					<a href="/">Home</a>
+					<span className="nav-sep">|</span>
 					<a href="/projects">Projects</a>
+					<a href="/rfqs">RFQs</a>
+					<a href="/sos">SOs</a>
+					<a href="/pos">POs</a>
+					<a href="/shipments">Shipments</a>
+					<a href="/invoices">Invoices</a>
+					<a href="/bills">Bills</a>
+					<span className="nav-sep">|</span>
 					<a href="/companies">Companies</a>
-					<a href="/bills">Bills inbox</a>
 					<a href="/qbo">QBO</a>
 					<a href="/help">Help</a>
 					<span className="spacer" />
