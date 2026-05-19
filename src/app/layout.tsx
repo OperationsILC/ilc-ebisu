@@ -17,7 +17,6 @@ export default async function RootLayout({ children }: { children: React.ReactNo
 					<strong>Ebisu</strong>
 					<a href="/">Home</a>
 					<span className="nav-sep">|</span>
-					<a href="/projects">Projects</a>
 					<a href="/rfqs">RFQs</a>
 					<a href="/sos">SOs</a>
 					<a href="/pos">POs</a>
@@ -25,7 +24,9 @@ export default async function RootLayout({ children }: { children: React.ReactNo
 					<a href="/invoices">Invoices</a>
 					<a href="/bills">Bills</a>
 					<span className="nav-sep">|</span>
+					<a href="/projects">Projects</a>
 					<a href="/companies">Companies</a>
+					<span className="nav-sep">|</span>
 					<a href="/qbo">QBO</a>
 					<a href="/help">Help</a>
 					<span className="spacer" />
