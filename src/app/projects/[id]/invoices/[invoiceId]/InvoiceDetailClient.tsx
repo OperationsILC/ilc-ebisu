@@ -10,7 +10,7 @@ import {
 	applyCreditToInvoice,
 	type DeliveredLineCandidate
 } from '../actions';
-import { updateInvoiceHeader, sendInvoiceEmail } from './actions';
+import { updateInvoiceHeader, sendInvoiceEmail, pushInvoiceToQboAction } from './actions';
 import { SendPanel } from '@/app/components/SendPanel';
 
 const usd = new Intl.NumberFormat('en-US', {
@@ -39,6 +39,9 @@ type Invoice = {
 	sentAt: string | null;
 	paidAt: string | null;
 	qboStatus: string;
+	qboId: string | null;
+	qboPushedAt: string | null;
+	qboLastError: string | null;
 	createdAt: string;
 	soNo: string | null;
 	soId: string | null;
@@ -212,6 +215,30 @@ export default function InvoiceDetailClient({
 		});
 	}
 
+	function onPushToQbo() {
+		const verb = invoice.qboStatus === 'pushed' ? 'Re-push' : 'Push';
+		if (
+			!confirm(
+				`${verb} ${invoice.invoiceNo} to QuickBooks Online?\n\n` +
+					(invoice.qboStatus === 'pushed'
+						? `This invoice already pushed (QBO ID ${invoice.qboId}). Re-pushing creates a SECOND invoice in QBO — only do this if you intentionally want a duplicate or if the previous one was deleted on QBO's side.`
+						: 'A new QBO Invoice will be created and its ID stored here.')
+			)
+		)
+			return;
+		startTransition(async () => {
+			const r = await pushInvoiceToQboAction(projectId, invoice.id);
+			if (r.error) errorThen(r.error);
+			else if (r.dryRun) {
+				flashThen(`Dry-run OK — payload logged to server console, nothing sent to QBO.`);
+				setTimeout(() => window.location.reload(), 700);
+			} else {
+				flashThen(`Pushed to QBO. New QBO Invoice ID: ${r.qboId}`);
+				setTimeout(() => window.location.reload(), 700);
+			}
+		});
+	}
+
 	const [creditApply, setCreditApply] = useState(invoice.creditAppliedAmount ?? '0');
 	const [depositApply, setDepositApply] = useState(invoice.depositAppliedAmount ?? '0');
 	function onApplyCredit() {
@@ -312,6 +339,16 @@ export default function InvoiceDetailClient({
 					startTransition={startTransition}
 					disabled={lines.length === 0}
 					disabledReason="add at least one line first"
+				/>
+			)}
+
+			{/* === QBO PUSH PANEL === */}
+			{invoice.status !== 'void' && (
+				<QboPushPanel
+					invoice={invoice}
+					onPush={onPushToQbo}
+					pending={pending}
+					hasLines={lines.length > 0}
 				/>
 			)}
 
@@ -834,6 +871,72 @@ function TypeBadge({ type }: { type: string }) {
 		>
 			{labels[type] ?? type}
 		</span>
+	);
+}
+
+function QboPushPanel({
+	invoice,
+	onPush,
+	pending,
+	hasLines
+}: {
+	invoice: Invoice;
+	onPush: () => void;
+	pending: boolean;
+	hasLines: boolean;
+}) {
+	const pushed = invoice.qboStatus === 'pushed';
+	const failed = invoice.qboStatus === 'failed';
+	const tone = pushed ? '#d4edda' : failed ? '#f8d7da' : '#eef';
+	const border = pushed ? '#a3d4af' : failed ? '#e2a4a4' : '#aac';
+
+	return (
+		<div
+			style={{
+				margin: '12px 0',
+				padding: '10px 12px',
+				background: tone,
+				border: `1px solid ${border}`,
+				borderRadius: '4px',
+				display: 'flex',
+				gap: '12px',
+				alignItems: 'center',
+				flexWrap: 'wrap',
+				maxWidth: '900px'
+			}}
+		>
+			<div style={{ flex: 1, minWidth: '240px' }}>
+				<div style={{ fontWeight: 600, fontSize: '13px' }}>
+					QuickBooks Online
+				</div>
+				{pushed ? (
+					<div className="muted" style={{ fontSize: '12px', marginTop: '2px' }}>
+						Pushed
+						{invoice.qboPushedAt
+							? ` ${new Date(invoice.qboPushedAt).toLocaleString()}`
+							: ''}
+						{' · '}QBO Invoice ID <strong>{invoice.qboId}</strong>
+					</div>
+				) : failed ? (
+					<div style={{ fontSize: '12px', marginTop: '2px', color: '#7a1212' }}>
+						Last push failed: {invoice.qboLastError ?? 'unknown error'}
+					</div>
+				) : (
+					<div className="muted" style={{ fontSize: '12px', marginTop: '2px' }}>
+						Not yet pushed. Pushes the invoice header + lines to QBO as a new
+						{invoice.type === 'credit_memo' ? ' Credit Memo' : ' Invoice'}.
+					</div>
+				)}
+			</div>
+			<button
+				onClick={onPush}
+				disabled={pending || !hasLines}
+				className={pushed ? '' : 'primary'}
+				title={!hasLines ? 'Add at least one line first' : undefined}
+			>
+				{pushed ? 'Re-push to QBO' : failed ? 'Retry push' : 'Push to QBO'}
+			</button>
+		</div>
 	);
 }
 

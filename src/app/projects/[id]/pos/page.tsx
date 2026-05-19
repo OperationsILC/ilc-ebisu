@@ -8,6 +8,7 @@ import {
 } from '@/lib/db/schema';
 import { eq, desc, sql } from 'drizzle-orm';
 import { notFound } from 'next/navigation';
+import TabHelp from '@/app/components/TabHelp';
 
 export default async function PosListPage({
 	params
@@ -46,6 +47,29 @@ export default async function PosListPage({
 			</p>
 
 			<h1>Purchase Orders — {project.name}</h1>
+
+			<TabHelp tabKey="pos" title="POs — what ILC ordered from manufacturers">
+				<p style={{ margin: '0 0 6px' }}>
+					Each PO covers one rep firm and the lines they&apos;re sourcing for this project.
+					Ebisu creates POs from a Sales Order — one PO per rep firm, all sharing the SO&apos;s
+					underlying lines.
+				</p>
+				<ul style={{ margin: '6px 0', paddingLeft: '20px' }}>
+					<li>
+						To create a new PO: go to the Sales Order, click{' '}
+						<strong>Create POs from SO</strong>.
+					</li>
+					<li>
+						PO and SO lines are <em>bidirectional</em>. Edit qty / unit_dn / unit_cn /
+						margin / rep quote # on either view and the other view re-renders with the same
+						data.
+					</li>
+					<li>
+						Send a PO PDF to the rep via email from the PO detail page. Tracking received
+						goods happens under <strong>Shipments</strong>.
+					</li>
+				</ul>
+			</TabHelp>
 
 			<p className="muted">
 				POs are created from Sales Orders. Go to an SO and use{' '}

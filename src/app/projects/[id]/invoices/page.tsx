@@ -8,6 +8,7 @@ import {
 import { eq, desc, sql } from 'drizzle-orm';
 import { notFound } from 'next/navigation';
 import { createDesignFeeInvoice, createCreditMemo } from './actions';
+import TabHelp from '@/app/components/TabHelp';
 
 export default async function InvoicesListPage({
 	params
@@ -66,6 +67,32 @@ export default async function InvoicesListPage({
 					(help ↗)
 				</a>
 			</h1>
+
+			<TabHelp tabKey="invoices" title="Invoices — billing the client (AR)">
+				<p style={{ margin: '0 0 6px' }}>
+					Three flavors, all numbered <code>IN#####</code> in one sequence:
+				</p>
+				<ul style={{ margin: '6px 0', paddingLeft: '20px' }}>
+					<li>
+						<strong>Product invoices</strong> bill the client for delivered fixtures. Created
+						from a Sales Order; pick from the &quot;delivered &amp; uninvoiced&quot; list.
+						Progress billing is supported — invoice less than the full delivered qty.
+					</li>
+					<li>
+						<strong>Design fee invoices</strong> bill design phases (50% SD, 100% DD, etc.).
+						Free-form lines, not tied to an SO.
+					</li>
+					<li>
+						<strong>Credit memos</strong> are negative invoices. Generate credit the client
+						can apply against a future invoice.
+					</li>
+				</ul>
+				<p style={{ margin: '6px 0 0' }}>
+					Each invoice can be sent as a branded PDF and pushed to QuickBooks Online. The
+					client&apos;s company must have a QBO Customer link first — set it under{' '}
+					<strong>Companies</strong>.
+				</p>
+			</TabHelp>
 
 			<p className="muted">
 				Product invoices are created from a Sales Order. Design-fee invoices and credit memos are

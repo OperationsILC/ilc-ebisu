@@ -3,6 +3,7 @@ import { qapLines, projects, types, products, companies } from '@/lib/db/schema'
 import { eq } from 'drizzle-orm';
 import { notFound } from 'next/navigation';
 import QapGridClient from './QapGridClient';
+import TabHelp from '@/app/components/TabHelp';
 
 export default async function QapPage({ params }: { params: Promise<{ id: string }> }) {
 	const { id } = await params;
@@ -56,6 +57,34 @@ export default async function QapPage({ params }: { params: Promise<{ id: string
 			</p>
 
 			<h1>QAP — {project.name}</h1>
+
+			<TabHelp tabKey="qap" title="How the QAP grid works">
+				<p style={{ margin: '0 0 6px' }}>
+					This is the source of truth for every line on the project — everything downstream
+					(budgets, RFQs, sales orders, invoices) snapshots from here. The grid is built for
+					bulk editing:
+				</p>
+				<ul style={{ margin: '6px 0', paddingLeft: '20px' }}>
+					<li>
+						Click a cell to edit. Tab/arrow keys move between cells. Modified cells turn
+						yellow.
+					</li>
+					<li>
+						Edit as many cells across as many rows as you want, then hit <strong>Save</strong>{' '}
+						once — the whole batch commits atomically. Rejected rows stay highlighted so you
+						can fix them.
+					</li>
+					<li>
+						SOs / Change Orders never write back here. The QAP is authoritative; downstream
+						docs hold their own snapshots.
+					</li>
+					<li>
+						Need to load lines from a designer&apos;s spreadsheet? Use{' '}
+						<strong>Import CSV</strong> from the project page.
+					</li>
+				</ul>
+			</TabHelp>
+
 			<p className="muted">
 				{serializedRows.length} line{serializedRows.length === 1 ? '' : 's'}.
 			</p>

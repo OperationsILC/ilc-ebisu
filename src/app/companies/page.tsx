@@ -19,13 +19,13 @@ export default async function CompaniesListPage({
 	}
 	if (roleFilter !== '') {
 		whereClause = sql`${whereClause} AND EXISTS (
-			SELECT 1 FROM ${companyRoles}
-			WHERE ${companyRoles.companyId} = ${companies.id}
-				AND ${companyRoles.role} = ${roleFilter}
+			SELECT 1 FROM company_roles cr
+			WHERE cr.company_id = ${companies.id}
+				AND cr.role = ${roleFilter}
 		)`;
 	}
 
-	const rows = await db
+	const rawRows = await db
 		.select({
 			id: companies.id,
 			name: companies.name,
@@ -34,12 +34,28 @@ export default async function CompaniesListPage({
 			quoteEmails: companies.quoteEmails,
 			orderEmails: companies.orderEmails,
 			qboCustomerId: companies.qboCustomerId,
-			qboVendorId: companies.qboVendorId,
-			roles: sql<string>`(SELECT string_agg(${companyRoles.role}, ',') FROM ${companyRoles} WHERE ${companyRoles.companyId} = ${companies.id})`
+			qboVendorId: companies.qboVendorId
 		})
 		.from(companies)
 		.where(whereClause)
 		.orderBy(asc(companies.name));
+
+	// Roles in a second query, then map them in. Avoids fragile correlated-
+	// subquery interpolation in the main select. One query for all roles is
+	// faster than one-per-row anyway.
+	const allRoles = await db
+		.select({ companyId: companyRoles.companyId, role: companyRoles.role })
+		.from(companyRoles);
+	const rolesByCompany = new Map<string, string[]>();
+	for (const r of allRoles) {
+		const arr = rolesByCompany.get(r.companyId) ?? [];
+		arr.push(r.role);
+		rolesByCompany.set(r.companyId, arr);
+	}
+	const rows = rawRows.map((r) => ({
+		...r,
+		roles: rolesByCompany.get(r.id) ?? []
+	}));
 
 	const [{ total }] = await db
 		.select({ total: sql<number>`count(*)::int` })
@@ -119,7 +135,7 @@ export default async function CompaniesListPage({
 					<tbody>
 						{rows.map((c) => {
 							const cityState = [c.city, c.state].filter(Boolean).join(', ');
-							const roles = (c.roles ?? '').split(',').filter(Boolean);
+							const roles = c.roles;
 							return (
 								<tr key={c.id}>
 									<td>
@@ -169,13 +185,16 @@ function RoleBadge({ role }: { role: string }) {
 	return (
 		<span
 			style={{
+				display: 'inline-block',
 				background: c.bg,
 				color: c.fg,
-				padding: '1px 5px',
-				marginRight: '3px',
+				padding: '3px 8px',
+				marginRight: '4px',
+				marginBottom: '2px',
 				borderRadius: '3px',
-				fontSize: '10px',
-				fontWeight: 600
+				fontSize: '12px',
+				fontWeight: 600,
+				letterSpacing: '0.02em'
 			}}
 		>
 			{labels[role] ?? role}

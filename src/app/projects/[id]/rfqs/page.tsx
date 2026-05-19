@@ -2,6 +2,7 @@ import { db } from '@/lib/db';
 import { rfqs, rfqLines, projects, companies } from '@/lib/db/schema';
 import { eq, desc, count } from 'drizzle-orm';
 import { notFound } from 'next/navigation';
+import TabHelp from '@/app/components/TabHelp';
 
 export default async function RfqsListPage({
 	params
@@ -38,6 +39,27 @@ export default async function RfqsListPage({
 			</p>
 
 			<h1>RFQs — {project.name}</h1>
+
+			<TabHelp tabKey="rfqs" title="Requesting quotes from rep firms">
+				<p style={{ margin: '0 0 6px' }}>
+					An RFQ asks one rep firm to quote dealer-net pricing on a set of QAP lines. When
+					the rep replies, you fill the quoted DN back into the RFQ and it flows into any
+					sales order built from those QAP lines.
+				</p>
+				<ul style={{ margin: '6px 0', paddingLeft: '20px' }}>
+					<li>
+						One RFQ per rep firm. If five manufacturers go through five reps, that&apos;s five
+						RFQs.
+					</li>
+					<li>
+						Click <strong>+ New RFQ</strong> to compose one — pick a rep firm, then check the
+						QAP lines to include.
+					</li>
+					<li>
+						Send via email from the RFQ detail page — the PDF attaches automatically.
+					</li>
+				</ul>
+			</TabHelp>
 
 			<p>
 				<a href={`/projects/${project.id}/rfqs/new`}>

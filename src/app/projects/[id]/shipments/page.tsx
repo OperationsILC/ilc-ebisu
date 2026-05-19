@@ -8,6 +8,7 @@ import {
 } from '@/lib/db/schema';
 import { eq, desc, sql } from 'drizzle-orm';
 import { notFound } from 'next/navigation';
+import TabHelp from '@/app/components/TabHelp';
 
 export default async function ProjectShipmentsPage({
 	params
@@ -63,6 +64,28 @@ export default async function ProjectShipmentsPage({
 			</p>
 
 			<h1>Shipments — {project.name}</h1>
+
+			<TabHelp tabKey="shipments" title="Shipments — tracking actual deliveries">
+				<p style={{ margin: '0 0 6px' }}>
+					A shipment is one physical delivery from one rep firm against one PO. Manufacturers
+					commonly split orders (50 now, 50 later) so a single PO can have many shipments.
+				</p>
+				<ul style={{ margin: '6px 0', paddingLeft: '20px' }}>
+					<li>
+						Create shipments from the PO detail page. Lines are partial-friendly — qty shipped
+						can be less than the line&apos;s qty.
+					</li>
+					<li>
+						Status lifecycle: <code>expected → in_transit → received</code> (or{' '}
+						<code>partial</code> for arrived-but-short).
+					</li>
+					<li>
+						Marking a shipment received is what makes those lines eligible to invoice on the
+						<strong> Invoices</strong> tab — the &quot;delivered &amp; uninvoiced&quot; picker
+						reads from this.
+					</li>
+				</ul>
+			</TabHelp>
 
 			<p className="muted">
 				Shipments are logged against POs. From a PO, click <strong>Shipments</strong> to add a new

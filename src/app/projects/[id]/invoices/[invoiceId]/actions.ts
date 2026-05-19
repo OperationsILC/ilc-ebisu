@@ -21,6 +21,7 @@ import {
 } from '@/lib/doc-email';
 import { renderInvoicePdf } from '@/lib/pdf/render';
 import { type InvoicePdfData } from '@/lib/pdf/invoice';
+import { pushInvoiceToQbo } from '@/lib/qbo/invoices';
 
 export async function updateInvoiceHeader(
 	projectId: string,
@@ -281,4 +282,35 @@ export async function sendInvoiceEmail(
 	revalidatePath(`/projects/${projectId}/invoices`);
 
 	return { ok: true, sentTo: recipients, redirectedTo: result.redirectedTo };
+}
+
+// ---------------------------------------------------------------------------
+// Push invoice to QBO
+// ---------------------------------------------------------------------------
+// Server-action wrapper around lib/qbo/invoices.pushInvoiceToQbo. The library
+// handles all the QBO API mechanics, dry-run shortcutting, and row-state
+// updates. This wrapper just guards on auth + serializes the result for the
+// client UI and revalidates the page so the QBO badge reflects the new state.
+
+export type PushInvoiceActionResult = {
+	ok?: boolean;
+	error?: string;
+	qboId?: string;
+	dryRun?: boolean;
+};
+
+export async function pushInvoiceToQboAction(
+	projectId: string,
+	invoiceId: string
+): Promise<PushInvoiceActionResult> {
+	await requireUser();
+
+	const result = await pushInvoiceToQbo(invoiceId);
+
+	revalidatePath(`/projects/${projectId}/invoices/${invoiceId}`);
+	revalidatePath(`/projects/${projectId}/invoices`);
+
+	if (!result.ok) return { error: result.error };
+	if ('dryRun' in result && result.dryRun) return { ok: true, dryRun: true };
+	return { ok: true, qboId: 'qboId' in result ? result.qboId : undefined };
 }

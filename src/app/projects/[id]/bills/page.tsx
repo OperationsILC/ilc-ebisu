@@ -9,6 +9,7 @@ import {
 import { eq, desc, sql } from 'drizzle-orm';
 import { notFound } from 'next/navigation';
 import { createBlankBill } from './actions';
+import TabHelp from '@/app/components/TabHelp';
 
 export default async function BillsListPage({
 	params
@@ -66,6 +67,27 @@ export default async function BillsListPage({
 					(help ↗)
 				</a>
 			</h1>
+
+			<TabHelp tabKey="bills" title="Bills — what ILC owes vendors (AP)">
+				<p style={{ margin: '0 0 6px' }}>
+					A bill is an invoice ILC <em>receives</em> from a manufacturer or rep firm. Don&apos;t
+					confuse it with an invoice — invoices are AR (money in), bills are AP (money out).
+				</p>
+				<ul style={{ margin: '6px 0', paddingLeft: '20px' }}>
+					<li>
+						Bills arrive via the <strong>Bills inbox</strong> (DocParser scrapes the emailed
+						PDF) or via manual entry here.
+					</li>
+					<li>
+						Workflow: <code>pending_review → approved → paid</code>. Reviewer matches the
+						bill to a PO, confirms line totals against the source PDF, then approves.
+					</li>
+					<li>
+						Approved bills push to QuickBooks Online as Vendor Bills. The vendor company
+						must have a QBO Vendor link first.
+					</li>
+				</ul>
+			</TabHelp>
 
 			<p className="muted">
 				Bills arrive via DocParser webhook (OCR&apos;d from emailed PDF) or manual entry. PMs

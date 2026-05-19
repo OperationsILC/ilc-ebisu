@@ -14,6 +14,7 @@ import {
 } from '@/lib/db/schema';
 import { eq, count, desc, sql } from 'drizzle-orm';
 import { notFound } from 'next/navigation';
+import TabHelp from '@/app/components/TabHelp';
 
 const usd = new Intl.NumberFormat('en-US', {
 	style: 'currency',
@@ -128,34 +129,83 @@ export default async function ProjectDetailPage({
 				 · created {new Date(p.createdAt).toLocaleDateString()}
 			</p>
 
-			<div style={{ display: 'flex', gap: '12px', margin: '16px 0', flexWrap: 'wrap' }}>
-				<a href={`/projects/${p.id}/budgets`}>
-					<button>Budgets ({budgetCount})</button>
-				</a>
-				<a href={`/projects/${p.id}/qap`}>
-					<button className="primary">Open QAP ({totalLines} lines)</button>
-				</a>
-				<a href={`/projects/${p.id}/qap/import`}>
-					<button>Import CSV</button>
-				</a>
-				<a href={`/projects/${p.id}/rfqs`}>
-					<button>RFQs ({rfqCount})</button>
-				</a>
-				<a href={`/projects/${p.id}/sos`}>
-					<button>Sales Orders ({soCount})</button>
-				</a>
-				<a href={`/projects/${p.id}/pos`}>
-					<button>Purchase Orders ({poCount})</button>
-				</a>
-				<a href={`/projects/${p.id}/shipments`}>
-					<button>Shipments ({shipmentCount})</button>
-				</a>
-				<a href={`/projects/${p.id}/invoices`}>
-					<button>Invoices ({invoiceCount})</button>
-				</a>
-				<a href={`/projects/${p.id}/bills`}>
-					<button>Bills ({billCount})</button>
-				</a>
+			<TabHelp tabKey="project-overview" title="The project workspace">
+				<p style={{ margin: '0 0 6px' }}>
+					Everything you do for a project lives behind the colored sections below. They&apos;re
+					grouped by where you are in the lifecycle:
+				</p>
+				<ul style={{ margin: '6px 0', paddingLeft: '20px' }}>
+					<li>
+						<strong>Plan</strong> — the QAP grid (source of truth), CSV import from designers,
+						and client-facing budgets snapshotted off the QAP.
+					</li>
+					<li>
+						<strong>Quote</strong> — RFQs out to rep firms. Quoted dealer-net comes back here
+						and flows into the order lines.
+					</li>
+					<li>
+						<strong>Order</strong> — Sales Orders (what ILC has sold to the client) and the
+						Purchase Orders ILC issues to manufacturers. Lines are bidirectional — edits in
+						either view propagate.
+					</li>
+					<li>
+						<strong>Receive</strong> — shipments against POs, with partial-line tracking. Mark
+						received to make those lines billable.
+					</li>
+					<li>
+						<strong>Bill</strong> — invoices to the client (AR) and bills from vendors (AP).
+						Both push to QuickBooks Online.
+					</li>
+				</ul>
+				<p style={{ margin: '6px 0 0' }}>
+					Use the <strong>Edit project</strong> link by the title to set the client, margin %,
+					tax, addresses, design fee total, etc.
+				</p>
+			</TabHelp>
+
+			{/* Workflow-grouped tab bar. Each group is one lifecycle stage. */}
+			<div style={{ display: 'grid', gap: '12px', margin: '8px 0 20px', maxWidth: '1100px' }}>
+				<StageRow label="Plan" color="#6f42c1">
+					<a href={`/projects/${p.id}/qap`}>
+						<button className="primary">Open QAP ({totalLines} lines)</button>
+					</a>
+					<a href={`/projects/${p.id}/qap/import`}>
+						<button>Import CSV</button>
+					</a>
+					<a href={`/projects/${p.id}/budgets`}>
+						<button>Budgets ({budgetCount})</button>
+					</a>
+				</StageRow>
+
+				<StageRow label="Quote" color="#0d6efd">
+					<a href={`/projects/${p.id}/rfqs`}>
+						<button>RFQs ({rfqCount})</button>
+					</a>
+				</StageRow>
+
+				<StageRow label="Order" color="#198754">
+					<a href={`/projects/${p.id}/sos`}>
+						<button>Sales Orders ({soCount})</button>
+					</a>
+					<a href={`/projects/${p.id}/pos`}>
+						<button>Purchase Orders ({poCount})</button>
+					</a>
+				</StageRow>
+
+				<StageRow label="Receive" color="#fd7e14">
+					<a href={`/projects/${p.id}/shipments`}>
+						<button>Shipments ({shipmentCount})</button>
+					</a>
+				</StageRow>
+
+				<StageRow label="Bill" color="#dc3545">
+					<a href={`/projects/${p.id}/invoices`}>
+						<button>Invoices to client ({invoiceCount})</button>
+					</a>
+					<a href={`/projects/${p.id}/bills`}>
+						<button>Bills from vendors ({billCount})</button>
+					</a>
+				</StageRow>
 			</div>
 
 			{totalLines > 0 && (
@@ -357,6 +407,45 @@ export default async function ProjectDetailPage({
 				</tbody>
 			</table>
 		</>
+	);
+}
+
+function StageRow({
+	label,
+	color,
+	children
+}: {
+	label: string;
+	color: string;
+	children: React.ReactNode;
+}) {
+	return (
+		<div
+			style={{
+				display: 'grid',
+				gridTemplateColumns: '90px 1fr',
+				alignItems: 'center',
+				gap: '12px',
+				padding: '4px 0'
+			}}
+		>
+			<div
+				style={{
+					fontSize: '11px',
+					textTransform: 'uppercase',
+					letterSpacing: '0.05em',
+					color: '#fff',
+					background: color,
+					padding: '4px 8px',
+					borderRadius: '3px',
+					textAlign: 'center',
+					fontWeight: 600
+				}}
+			>
+				{label}
+			</div>
+			<div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>{children}</div>
+		</div>
 	);
 }
 

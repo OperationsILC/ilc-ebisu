@@ -3,6 +3,7 @@ import { salesOrders, orderLines, projects, purchaseOrders } from '@/lib/db/sche
 import { eq, desc, count, sql } from 'drizzle-orm';
 import { notFound } from 'next/navigation';
 import { createSo } from './actions';
+import TabHelp from '@/app/components/TabHelp';
 
 export default async function SosListPage({
 	params
@@ -38,6 +39,28 @@ export default async function SosListPage({
 			</p>
 
 			<h1>Sales Orders — {project.name}</h1>
+
+			<TabHelp tabKey="sos" title="Sales Orders — what ILC has sold">
+				<p style={{ margin: '0 0 6px' }}>
+					A Sales Order is the contract between ILC and the client — qty + unit prices for
+					the fixtures the client is buying. Lines are pulled from the QAP and snapshot at
+					creation; editing them here doesn&apos;t alter the QAP.
+				</p>
+				<ul style={{ margin: '6px 0', paddingLeft: '20px' }}>
+					<li>
+						<strong>+ New Sales Order</strong> creates a draft. Open it, pick QAP lines to
+						include, set qty + unit_dn.
+					</li>
+					<li>
+						Once the SO has lines with real numbers, use <strong>Create POs from SO</strong>{' '}
+						(on the SO detail) to generate one PO per rep firm.
+					</li>
+					<li>
+						SO and PO lines are <em>bidirectional</em>: editing qty / unit price on either
+						view updates the underlying line — both views render fresh data.
+					</li>
+				</ul>
+			</TabHelp>
 
 			<form action={createSoAction} style={{ margin: '16px 0' }}>
 				<button className="primary" type="submit">

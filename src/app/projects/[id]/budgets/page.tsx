@@ -3,6 +3,7 @@ import { budgets, budgetLines, projects } from '@/lib/db/schema';
 import { eq, desc, sql } from 'drizzle-orm';
 import { notFound } from 'next/navigation';
 import { createBudget } from './actions';
+import TabHelp from '@/app/components/TabHelp';
 
 const usd = new Intl.NumberFormat('en-US', {
 	style: 'currency',
@@ -56,6 +57,25 @@ export default async function BudgetsListPage({
 					(help ↗)
 				</a>
 			</h1>
+
+			<TabHelp tabKey="budgets" title="Budgets are frozen snapshots of the QAP">
+				<p style={{ margin: '0 0 6px' }}>
+					A budget is a client-facing dollar projection at a design milestone. Each budget
+					freezes QAP qty + dealer-net + margin at the moment you create it — later QAP edits
+					do <em>not</em> reach back and change it.
+				</p>
+				<ul style={{ margin: '6px 0', paddingLeft: '20px' }}>
+					<li>
+						Create one per phase (Schematic, Design Development, Construction Documents,
+						etc.). They&apos;re numbered <code>BG#####</code>.
+					</li>
+					<li>
+						Each budget has its own margin / freight / warehousing / tax overrides; leave
+						blank to inherit the project defaults.
+					</li>
+					<li>Generate a branded PDF from the detail page to send to the client.</li>
+				</ul>
+			</TabHelp>
 			<p className="muted">
 				Versioned snapshots of the QAP&apos;s pricing at design milestones. Each budget freezes
 				a moment in time so PMs can compare against earlier versions and against project
